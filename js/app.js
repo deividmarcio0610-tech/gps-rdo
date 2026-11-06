@@ -18,7 +18,10 @@
   };
 
   // telas que funcionam sem um RDO aberto (a de apagar não pode recriar o que acabou de sumir)
-  const SEM_RDO = new Set(['home', 'reports']);
+  const SEM_RDO = new Set(['home', 'reports', 'backup', 'month']);
+
+  // APK sempre da última versão publicada no GitHub (fora do service worker do site)
+  const APK_URL = 'https://github.com/deividmarcio0610-tech/gps-rdo/releases/latest/download/GPS-RDO.apk';
 
   /** RDO aberto. Entrar numa seção cria o RDO em silêncio, como no original,
    *  mas reaproveita um rascunho vazio do mesmo dia para não poluir o histórico. */
@@ -142,14 +145,24 @@
     el.relatorioTopo.classList.toggle('hidden', tela !== 'home');
 
     definicao.bind?.(el.tela);
+    UI.ligarDitado(el.tela);
 
     document.body.classList.toggle('dark', Boolean(Store.config.darkMode));
+    document.body.classList.toggle('campo', Boolean(Store.config.modoCampo));
     el.tema.innerHTML = `
       <button class="iconbtn" id="btn-theme" style="color:var(--text-soft)" aria-label="Alternar tema">
         ${UI.icon(Store.config.darkMode ? 'sun' : 'moon', 18)}
+      </button>
+      <button class="iconbtn campo-btn${Store.config.modoCampo ? ' ativo' : ''}" id="btn-campo" aria-label="Modo campo: letra maior">
+        ${UI.icon('text', 18)}<span>${Store.config.modoCampo ? 'Letra normal' : 'Letra maior'}</span>
       </button>`;
     document.getElementById('btn-theme').addEventListener('click', () => {
       Store.setDarkMode(!Store.config.darkMode);
+      render();
+    });
+    document.getElementById('btn-campo').addEventListener('click', () => {
+      Store.setModoCampo(!Store.config.modoCampo);
+      UI.toast(Store.config.modoCampo ? 'Modo campo: letra e botões maiores.' : 'Letra normal.');
       render();
     });
 
@@ -157,18 +170,28 @@
     window.scrollTo({ top: 0 });
   }
 
-  /** Faixa de instalação: aparece só quando dá para instalar e não está instalado. */
+  /**
+   * Faixa de instalação (aparece no link, não no app instalado):
+   * Android baixa o APK; iPhone mostra como pôr na Tela de Início.
+   */
   function desenharInstalacao() {
     if (!el.instalar) return;
-    if (!Pwa.podeInstalar()) { el.instalar.innerHTML = ''; return; }
+    const noApp = window.Capacitor?.isNativePlatform?.() || Pwa.instalado();
+    const apk = !noApp && Pwa.ehAndroid();
+    const pwa = !noApp && Pwa.podeInstalar() && !apk;
+    if (!apk && !pwa) { el.instalar.innerHTML = ''; return; }
 
-    const rotulo = Pwa.ehIOS() ? 'Adicionar à Tela de Início' : 'Instalar aplicativo';
+    const rotulo = Pwa.ehIOS() ? 'Instalar no iPhone (Tela de Início)' : 'Instalar aplicativo';
     el.instalar.innerHTML = `
-      <button class="btn ghost block" id="btn-instalar" style="font-size:12.5px">
-        ${UI.icon('install', 16)}${rotulo}
-      </button>`;
+      ${apk ? `<a class="btn ghost block" id="btn-apk" href="${APK_URL}" rel="noopener" style="font-size:12.5px">
+        ${UI.icon('download', 16)}Baixar o app Android (APK)</a>` : ''}
+      ${pwa ? `<button class="btn ghost block" id="btn-instalar" style="font-size:12.5px">${UI.icon('install', 16)}${rotulo}</button>` : ''}`;
 
-    document.getElementById('btn-instalar').addEventListener('click', async () => {
+    document.getElementById('btn-apk')?.addEventListener('click', () => {
+      UI.toast('Baixando... depois abra o arquivo GPS-RDO.apk e permita instalar.');
+    });
+
+    document.getElementById('btn-instalar')?.addEventListener('click', async () => {
       const resultado = await Pwa.instalar();
       if (resultado === 'recusado') { UI.toast('Instalação cancelada.'); return; }
       if (resultado === 'indisponivel') {
@@ -206,13 +229,16 @@
 
   // atalhos do manifest (?abrir=photos / ?abrir=report)
   const atalho = new URLSearchParams(location.search).get('abrir');
-  const telasValidas = ['header', 'workforce', 'equipment', 'tasks', 'occurrences', 'photos', 'report', 'reports'];
+  const telasValidas = ['header', 'workforce', 'equipment', 'tasks', 'occurrences', 'stops', 'photos', 'report', 'reports', 'backup', 'month'];
   if (atalho && telasValidas.includes(atalho)) {
     estado.pilha.push(atalho);
     marcar(false);
   }
 
   render();
+
+  // fotos de versões antigas saem do localStorage (cota de 5 MB) para o IndexedDB
+  Fotos.migrar(Store).catch(() => {});
 
   // exposto para depuração e testes
   window.__rdo = { app, estado, render };

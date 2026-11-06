@@ -9,6 +9,16 @@ window.UI = (() => {
     clipboard: '<path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/><path d="m9 14 2 2 4-4"/>',
     alert: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4M12 17h.01"/>',
     camera: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3Z"/><circle cx="12" cy="13" r="3"/>',
+    image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    chart: '<path d="M3 3v18h18"/><path d="M7 15v3M12 10v8M17 6v12"/>',
+    mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
+    text: '<path d="M4 7V5h16v2M9 19h6M12 5v14"/>',
+    lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+    unlock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.8-1.3"/>',
+    shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/>',
+    upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5M12 3v12"/>',
+    share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/>',
     output: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Z"/><path d="M14 2v6h6M12 18v-6M9 15l3 3 3-3"/>',
     trash: '<path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
@@ -86,7 +96,7 @@ window.UI = (() => {
           return `<div class="field"><label for="${id}">${esc(f.label)}</label><select id="${id}" data-key="${esc(f.key)}">${opts}</select></div>`;
         }
         if (f.type === 'textarea') {
-          return `<div class="field"><label for="${id}">${esc(f.label)}</label><textarea id="${id}" data-key="${esc(f.key)}" placeholder="${esc(f.placeholder || '')}">${esc(f.value ?? '')}</textarea></div>`;
+          return `<div class="field"><label for="${id}">${esc(f.label)}</label><textarea id="${id}" data-key="${esc(f.key)}" data-ditado placeholder="${esc(f.placeholder || '')}">${esc(f.value ?? '')}</textarea></div>`;
         }
         const tipo = f.type || 'text';
         const extra = tipo === 'number' ? ' min="0" max="100" step="1" inputmode="numeric"' : '';
@@ -122,6 +132,7 @@ window.UI = (() => {
         }
       });
       document.body.appendChild(scrim);
+      ligarDitado(scrim);
       onOpen?.(scrim);
       const primeiro = scrim.querySelector('input, select, textarea');
       if (!primeiro?.readOnly) primeiro?.focus();
@@ -154,5 +165,133 @@ window.UI = (() => {
     });
   }
 
-  return { icon, esc, fmtDate, fmtTime, nowTime, toast, sheet, confirmar, fecharFolhas };
+  // ditado por voz: só onde o navegador tem reconhecimento (Chrome, Safari). No APK e onde
+  // não houver, o botão não aparece e vale o microfone do próprio teclado do celular.
+  const Reconhecedor = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  /** Põe o botão de microfone nos campos de texto marcados com data-ditado. */
+  function ligarDitado(raiz) {
+    if (!Reconhecedor || !raiz) return;
+    raiz.querySelectorAll('textarea[data-ditado]:not([data-ditado-ok])').forEach((campo) => {
+      campo.dataset.ditadoOk = '1';
+      const botao = document.createElement('button');
+      botao.type = 'button';
+      botao.className = 'mic';
+      botao.setAttribute('aria-label', 'Ditar por voz');
+      botao.innerHTML = icon('mic', 18);
+      campo.parentElement.classList.add('com-ditado');
+      campo.insertAdjacentElement('afterend', botao);
+      let ouvindo = null;
+      botao.addEventListener('click', () => {
+        if (ouvindo) { ouvindo.stop(); return; }
+        const rec = new Reconhecedor();
+        rec.lang = 'pt-BR';
+        rec.interimResults = false;
+        rec.maxAlternatives = 1;
+        rec.onresult = (e) => {
+          const texto = [...e.results].map((x) => x[0].transcript).join(' ').trim();
+          if (texto) campo.value = campo.value ? `${campo.value.trimEnd()} ${texto}` : texto;
+        };
+        rec.onerror = (e) => toast(e.error === 'not-allowed'
+          ? 'Permita o microfone para ditar.'
+          : 'Não entendi. Tente de novo ou use o microfone do teclado.');
+        rec.onend = () => { ouvindo = null; botao.classList.remove('ouvindo'); };
+        try {
+          rec.start();
+          ouvindo = rec;
+          botao.classList.add('ouvindo');
+          toast('Pode falar... toque de novo para parar.');
+        } catch {
+          toast('Ditado indisponível neste aparelho.');
+        }
+      });
+    });
+  }
+
+  function baixar(blob, nome) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = nome;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  }
+
+  const blobParaBase64 = (blob) => new Promise((resolve, reject) => {
+    const leitor = new FileReader();
+    leitor.onload = () => resolve(String(leitor.result).split(',')[1]);
+    leitor.onerror = reject;
+    leitor.readAsDataURL(blob);
+  });
+
+  /**
+   * Entrega um arquivo pelo compartilhar do aparelho (Salvar em Arquivos, Drive, WhatsApp,
+   * e-mail) ou, sem isso, baixa. No navegador tem de ser chamado direto no toque do botão:
+   * o Safari só abre o compartilhar dentro do toque.
+   * Devolve 'compartilhado', 'cancelado' ou 'baixado'.
+   */
+  function entregarArquivo(conteudo, nome, titulo = 'Salvar ou enviar') {
+    const nativo = window.Capacitor?.isNativePlatform?.() ? window.Capacitor.Plugins : null;
+    if (nativo?.Filesystem && nativo?.Share) {
+      return (async () => {
+        const arq = await nativo.Filesystem.writeFile({ path: nome, data: await blobParaBase64(conteudo), directory: 'CACHE' });
+        try {
+          await nativo.Share.share({ title: nome, files: [arq.uri], dialogTitle: titulo });
+          return 'compartilhado';
+        } catch (err) {
+          if (/cancel/i.test(String(err?.message || err))) return 'cancelado';
+          throw err;
+        }
+      })();
+    }
+    const arquivo = new File([conteudo], nome, { type: conteudo.type || 'application/octet-stream' });
+    if (navigator.canShare?.({ files: [arquivo] })) {
+      return navigator.share({ files: [arquivo], title: nome }).then(() => 'compartilhado', (err) => {
+        if (err?.name === 'AbortError') return 'cancelado';
+        baixar(arquivo, nome);
+        return 'baixado';
+      });
+    }
+    baixar(arquivo, nome);
+    return Promise.resolve('baixado');
+  }
+
+  /**
+   * Botão em duas etapas para arquivo que demora a montar (PDF, cópia): 1º toque monta,
+   * 2º toque entrega. No APK entrega direto no 1º toque (lá não há a regra do toque).
+   */
+  function botaoArquivo(botao, { rotulo, preparar, aoEntregar }) {
+    const texto = botao.querySelector('span') || botao;
+    let pronto = null;
+    botao.addEventListener('click', async () => {
+      if (pronto) {
+        const p = pronto;
+        pronto = null;
+        texto.textContent = rotulo;
+        entregarArquivo(p.blob, p.nome, p.titulo).then(aoEntregar, () => toast('Não foi possível entregar o arquivo.'));
+        return;
+      }
+      botao.disabled = true;
+      texto.textContent = 'Montando o arquivo...';
+      try {
+        const p = await preparar();
+        if (window.Capacitor?.isNativePlatform?.()) {
+          texto.textContent = rotulo;
+          aoEntregar?.(await entregarArquivo(p.blob, p.nome, p.titulo));
+        } else {
+          pronto = p;
+          texto.textContent = 'Pronto: toque para salvar/enviar';
+        }
+      } catch {
+        texto.textContent = rotulo;
+        toast('Não foi possível montar o arquivo.');
+      } finally {
+        botao.disabled = false;
+      }
+    });
+  }
+
+  return { icon, esc, fmtDate, fmtTime, nowTime, toast, sheet, confirmar, fecharFolhas, entregarArquivo, botaoArquivo, ligarDitado };
 })();

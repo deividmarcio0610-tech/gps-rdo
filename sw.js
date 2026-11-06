@@ -3,13 +3,14 @@
  * Estratégia — rede primeiro para o HTML (pega versão nova quando há internet),
  * cache primeiro para os demais arquivos, que só mudam junto com uma versão.
  */
-const VERSAO = 'gps-rdo-v5';
+const VERSAO = 'gps-rdo-v7';
 const ESSENCIAIS = [
   './',
   'index.html',
   'styles.css',
   'manifest.webmanifest',
   'js/store.js',
+  'js/fotos.js',
   'js/ui.js',
   'js/logo.js',
   'js/pdf.js',
@@ -56,8 +57,11 @@ self.addEventListener('fetch', (evento) => {
     evento.respondWith(
       fetch(request)
         .then((resposta) => {
-          const copia = resposta.clone();
-          caches.open(VERSAO).then((cache) => cache.put('index.html', copia));
+          // só guarda como index.html o que for a página do app (um download, por exemplo, não)
+          if (resposta.ok && (resposta.headers.get('content-type') || '').includes('text/html')) {
+            const copia = resposta.clone();
+            caches.open(VERSAO).then((cache) => cache.put('index.html', copia));
+          }
           return resposta;
         })
         .catch(() => caches.match('index.html').then((r) => r || caches.match('./'))),

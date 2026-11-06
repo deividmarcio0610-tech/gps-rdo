@@ -412,6 +412,138 @@ select {
 /* apagar relatório inteiro: alvo de toque maior e vermelho */
 .card .del-rdo { color: var(--red); min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center; }
 
+/* ---------------------------------------------------------------- melhorias de 06/11 */
+
+.action-card.wide.neutro-card { height: 56px; background: var(--surface); color: var(--text); }
+.action-card.wide.neutro-card svg { stroke: var(--blue); }
+
+.btn.dark { background: #2b2f36; color: #fff; }
+body.dark .btn.dark { background: #e8e9eb; color: #15171a; }
+
+.dica { font-size: 11.5px; color: var(--text-soft); line-height: 1.5; margin: 0; }
+
+.aviso-info {
+  background: var(--surface);
+  border-left: 4px solid var(--blue);
+  border-radius: var(--radius);
+  padding: 11px 13px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+/* RDO finalizado: aviso no topo de cada seção */
+.aviso-final {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  background: var(--green-soft);
+  color: var(--green);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.aviso-final svg { flex: 0 0 auto; margin-top: 1px; }
+
+/* cabeçalho travado: o fieldset desliga todos os campos de uma vez */
+fieldset.campos { border: 0; margin: 0; padding: 0; min-width: 0; }
+fieldset.campos[disabled] input,
+fieldset.campos[disabled] select,
+fieldset.campos[disabled] textarea { background: var(--surface); color: var(--text-soft); }
+
+/* corpo do cartão vira botão: tocar corrige o item */
+.card .body.editar {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+}
+.card .body.editar:disabled { cursor: default; }
+.card button.badge { border: 0; font-family: inherit; cursor: pointer; }
+.card button.badge:disabled { cursor: default; }
+.card .selos { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+
+/* pendências do backlog vindas de RDOs anteriores */
+.pendencias {
+  background: var(--amber-soft);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pendencias .label { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--amber); }
+.pendencia { display: flex; align-items: center; gap: 10px; }
+.pendencia .grow { flex: 1; min-width: 0; }
+.pendencia .num { font-weight: 600; font-size: 13px; }
+.pendencia .meta { font-size: 11px; color: var(--text-soft); }
+
+/* lista de RDOs do resumo do mês: o cartão inteiro abre o RDO */
+.card.linha-rdo { border: 0; width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer; align-items: center; }
+
+/* ditado por voz: microfone dentro do campo de texto */
+.com-ditado { position: relative; }
+.com-ditado textarea { padding-right: 44px; }
+.mic {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.mic.ouvindo { background: var(--red); color: #fff; animation: pulsar 1s ease-in-out infinite; }
+@keyframes pulsar { 50% { transform: scale(1.12); } }
+
+/* botão de modo campo, ao lado do tema */
+.theme-toggle { gap: 8px; align-items: center; }
+.campo-btn { width: auto; border-radius: 20px; padding: 0 12px; gap: 6px; font-size: 12px; font-weight: 600; color: var(--text-soft); }
+.campo-btn.ativo { background: var(--orange-soft); color: var(--orange); }
+
+/* modo campo: tudo maior (zoom não mexe nas larguras em %) e mais contraste, para sol e luva */
+body.campo #app,
+body.campo .scrim .sheet,
+body.campo .toast { zoom: 1.15; }
+body.campo { --text-soft: #3b3f46; --line: #b5b9c0; }
+body.campo.dark { --text-soft: #d0d3d8; --line: #4d535c; }
+
+/* filtro das listas de RDO: data e tipo lado a lado */
+.filtro {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+  margin: 2px 0 8px;
+}
+
+.contagem {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-soft);
+  padding: 2px 2px 6px;
+}
+
+.history .row .badge { flex: 0 0 auto; }
+.lista-cartoes { display: flex; flex-direction: column; gap: 10px; }
+
+/* qual RDO está aberto na tela inicial */
+.rdo-aberto {
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-soft);
+  margin: -2px 0 2px;
+}
+.rdo-aberto strong { color: var(--text); }
+
 .aviso-perigo {
   background: var(--red-soft);
   color: var(--red);
@@ -469,6 +601,7 @@ select {
 }
 
 .photo {
+  margin: 0;  /* o navegador põe 40px de margem em <figure>: a foto ficava pequena na grade */
   position: relative;
   aspect-ratio: 1;
   border-radius: 10px;

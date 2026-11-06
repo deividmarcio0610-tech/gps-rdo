@@ -17,6 +17,7 @@ window.Whatsapp = (() => {
     partes.push(`RDO ${rdo.number}`);
     // só o que foi preenchido; o contrato fixo saiu (a mina vai no Local)
     partes.push([fmtDate(rdo.date), rdo.shift && `Turno ${rdo.shift}`, rdo.weather].filter(Boolean).join(' · '));
+    if (rdo.maintenanceType) partes.push(`Tipo: ${rdo.maintenanceType}`);
     if (rdo.location) partes.push(`Local: ${rdo.location}`);
     if (rdo.startTime || rdo.endTime) partes.push(`Horário: ${rdo.startTime || '—'} às ${rdo.endTime || '—'}`);
     if (rdo.supervisor) partes.push(`Supervisor: ${rdo.supervisor}`);
@@ -53,7 +54,8 @@ window.Whatsapp = (() => {
       rdo.tasks.forEach((t) => {
         // o campo já costuma vir como "OS-4472": evita "OS OS-4472"
         const etiqueta = t.os ? (/^os\b/i.test(t.os) ? `${t.os} — ` : `OS ${t.os} — `) : '';
-        partes.push(`• ${etiqueta}${t.description} (${Number(t.progress) || 0}%)`);
+        const tipo = t.maintenanceType ? `[${t.maintenanceType}] ` : '';
+        partes.push(`• ${tipo}${etiqueta}${t.description} (${Number(t.progress) || 0}%)`);
       });
     }
 
@@ -66,9 +68,19 @@ window.Whatsapp = (() => {
       });
     }
 
+    const paradas = rdo.stoppages || [];
+    if (paradas.length && window.Store?.minutosParada) {
+      const total = paradas.reduce((s, p) => s + window.Store.minutosParada(p), 0);
+      partes.push('');
+      partes.push(`*HORAS PARADAS* (${window.Store.fmtHoras(total)})`);
+      paradas.forEach((p) => {
+        partes.push(`• ${p.reason}: ${p.start} às ${p.end} (${window.Store.fmtHoras(window.Store.minutosParada(p))})${p.note ? ` — ${p.note}` : ''}`);
+      });
+    }
+
     if (rdo.photos.length) {
       partes.push('');
-      partes.push(`Fotos anexadas no sistema: ${rdo.photos.length}`);
+      partes.push(`Fotos: ${rdo.photos.length} (vão no PDF do RDO)`);
     }
 
     if (rdo.notes) {

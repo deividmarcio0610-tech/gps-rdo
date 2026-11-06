@@ -31,8 +31,8 @@ window.Store = (() => {
 
   /** Rascunho nunca preenchido: limpa os valores que a versão antiga marcava sozinha. */
   function limparRascunhoAntigo(r) {
-    const vazio = r && r.status === 'draft' && !r.supervisor && !r.notes && !r.location
-      && ['workforce', 'equipmentList', 'tasks', 'occurrences', 'photos'].every((k) => !r[k]?.length);
+    const vazio = r && r.status === 'draft' && !r.supervisor && !r.notes && !r.location && !r.maintenanceType
+      && ['workforce', 'equipmentList', 'tasks', 'occurrences', 'stoppages', 'photos'].every((k) => !r[k]?.length);
     if (!vazio) return r;
     const padroes = { shift: 'A', weather: 'Sol', startTime: '07:00', endTime: '17:00', contractId: 'c1', contractName: 'Contrato Mina Norte' };
     for (const [k, v] of Object.entries(padroes)) if (r[k] === v) r[k] = '';
@@ -53,7 +53,8 @@ window.Store = (() => {
         ...base,
         ...parsed,
         config,
-        rdos: Array.isArray(parsed.rdos) ? parsed.rdos.map(limparRascunhoAntigo) : [],
+        // RDO de versão anterior não tem horas paradas: começa com a lista vazia
+        rdos: Array.isArray(parsed.rdos) ? parsed.rdos.map((r) => ({ stoppages: [], ...limparRascunhoAntigo(r) })) : [],
         ultimos: parsed.ultimos && typeof parsed.ultimos === 'object' ? parsed.ultimos : {},
         employees: semExemplo(parsed.employees),
         equipment: semExemplo(parsed.equipment),
@@ -114,6 +115,7 @@ window.Store = (() => {
       contractId: '',
       contractName: '',
       location: '',  // local / mina digitado à mão no cabeçalho
+      maintenanceType: '',  // Preventiva, Corretiva ou Backlog (escolhido no cabeçalho)
       shift: '',
       weather: '',
       startTime: '',
@@ -125,9 +127,25 @@ window.Store = (() => {
       equipmentList: [],
       tasks: [],
       occurrences: [],
+      stoppages: [],  // horas paradas: { id, start, end, reason, note }
       photos: [],
     };
   }
+
+  /** Minutos de uma parada (HH:MM → HH:MM); passa da meia-noite se o fim for menor. */
+  function minutosParada(p) {
+    const min = (hhmm) => {
+      const [h, m] = String(hhmm || '').split(':').map(Number);
+      return Number.isInteger(h) && Number.isInteger(m) ? h * 60 + m : null;
+    };
+    const ini = min(p?.start);
+    const fim = min(p?.end);
+    if (ini == null || fim == null) return 0;
+    return fim >= ini ? fim - ini : fim + 1440 - ini;
+  }
+
+  /** 90 → "1h30", 45 → "0h45". */
+  const fmtHoras = (minutos) => `${Math.floor(minutos / 60)}h${String(minutos % 60).padStart(2, '0')}`;
 
   return {
     get all() { return db; },
@@ -139,12 +157,20 @@ window.Store = (() => {
 
     uid,
     todayIso,
+    minutosParada,
+    fmtHoras,
     nextNumber,
     emptyRdo,
     save,
 
     setDarkMode(on) {
       db.config.darkMode = Boolean(on);
+      save();
+    },
+
+    /** Modo campo: letra e botões maiores, mais contraste (sol, luva). */
+    setModoCampo(on) {
+      db.config.modoCampo = Boolean(on);
       save();
     },
 
@@ -160,13 +186,70 @@ window.Store = (() => {
     find(id) { return db.rdos.find((r) => r.id === id) || null; },
     get recentes() { return db.rdos.slice(0, 3); },
 
+    /** Número novo para outra data (a data do cabeçalho mudou): o número sempre acompanha a data. */
+    numeroPara(dataIso) {
+      const numero = nextNumber(dataIso);
+      marcarNumero(numero);
+      return numero;
+    },
+
     /** Apaga o RDO de vez, com as fotos. Não há lixeira. */
     remove(id) {
       const rdo = db.rdos.find((r) => r.id === id);
       if (!rdo) return false;
       marcarNumero(rdo.number);
       db.rdos = db.rdos.filter((r) => r.id !== id);
+      window.Fotos?.remover(rdo.photos);
       return save();
+    },
+
+    /**
+     * Restaura RDOs de uma cópia de segurança. RDO que já existe aqui (mesmo id) fica como
+     * está; os outros entram. Devolve quantos entraram ou -1 se não coube.
+     */
+    importar(rdos, ultimos = {}) {
+      const antes = { rdos: db.rdos.slice(), ultimos: { ...(db.ultimos || {}) } };
+      const novos = (Array.isArray(rdos) ? rdos : [])
+        .filter((r) => r && r.id && !db.rdos.some((x) => x.id === r.id))
+        .map((r) => ({ stoppages: [], ...r }));
+      db.rdos.push(...novos);
+      db.rdos.sort((a, b) => String(b.number).localeCompare(String(a.number)));
+      Object.entries(ultimos || {}).forEach(([dia, n]) => marcarNumero(`${dia}-${n}`));
+      novos.forEach((r) => marcarNumero(r.number));
+      if (save()) return novos.length;
+      db.rdos = antes.rdos;
+      db.ultimos = antes.ultimos;
+      return -1;
+    },
+
+    /** Números de uma lista de RDOs (resumo do mês). */
+    resumo(lista) {
+      const tipos = () => ({ Preventiva: 0, Corretiva: 0, Backlog: 0 });
+      const r = {
+        total: lista.length, finalizados: 0, porTipo: tipos(), tarefasPorTipo: tipos(), tarefas: 0, concluidas: 0,
+        backlogAberto: 0, horasEquipe: 0, minutosParados: 0, ocorrencias: 0, fotos: 0, motivosParada: [],
+      };
+      const motivos = new Map();
+      lista.forEach((x) => {
+        if (x.status === 'final') r.finalizados += 1;
+        if (x.maintenanceType in r.porTipo) r.porTipo[x.maintenanceType] += 1;
+        (x.tasks || []).forEach((t) => {
+          r.tarefas += 1;
+          if ((Number(t.progress) || 0) >= 100) r.concluidas += 1;
+          if (t.maintenanceType in r.tarefasPorTipo) r.tarefasPorTipo[t.maintenanceType] += 1;
+          if (t.maintenanceType === 'Backlog' && (Number(t.progress) || 0) < 100) r.backlogAberto += 1;
+        });
+        (x.workforce || []).filter((w) => w.status === 'Presente').forEach((w) => { r.horasEquipe += Number(w.hours) || 0; });
+        (x.stoppages || []).forEach((p) => {
+          const m = minutosParada(p);
+          r.minutosParados += m;
+          motivos.set(p.reason, (motivos.get(p.reason) || 0) + m);
+        });
+        r.ocorrencias += (x.occurrences || []).length;
+        r.fotos += (x.photos || []).length;
+      });
+      r.motivosParada = [...motivos.entries()].sort((a, b) => b[1] - a[1]);
+      return r;
     },
 
     /** Tamanho aproximado dos dados salvos, em bytes (as fotos pesam quase tudo). */
@@ -176,10 +259,15 @@ window.Store = (() => {
 
     /** Salva alterações de um RDO; devolve false quando a cota estoura. */
     update(id, mutate) {
-      const rdo = db.rdos.find((r) => r.id === id);
-      if (!rdo) return false;
-      mutate(rdo);
-      return save();
+      const i = db.rdos.findIndex((r) => r.id === id);
+      if (i < 0) return false;
+      const antes = JSON.stringify(db.rdos[i]);
+      mutate(db.rdos[i]);
+      if (save()) return true;
+      // cota estourou: desfaz também na memória. Antes a alteração ficava só na tela,
+      // sumia ao reabrir e travava a gravação de tudo o que viesse depois.
+      db.rdos[i] = JSON.parse(antes);
+      return false;
     },
   };
 })();
