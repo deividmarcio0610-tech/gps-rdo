@@ -1,0 +1,661 @@
+:root {
+  --orange: #ff5722;
+  --orange-dark: #e64a19;
+  --orange-soft: #fff3ef;
+  --blue: #1565c0;
+  --bg: #ffffff;
+  --surface: #f3f3f3;
+  --surface-2: #ececec;
+  --text: #1f2023;
+  --text-soft: #6b6f76;
+  --line: #e2e2e2;
+  --green: #2e7d32;
+  --green-soft: #e8f5e9;
+  --red: #c62828;
+  --red-soft: #fdecea;
+  --amber: #b26a00;
+  --amber-soft: #fff4e0;
+  --radius: 12px;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.09);
+}
+
+body.dark {
+  --bg: #15171a;
+  --surface: #1e2126;
+  --surface-2: #262a30;
+  --text: #e8e9eb;
+  --text-soft: #9aa0a8;
+  --line: #2f343b;
+  --orange-soft: #33201a;
+  --green-soft: #14261a;
+  --red-soft: #2c1717;
+  --amber-soft: #2b2314;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #d9d9d9;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  color: var(--text);
+  font-size: 14px;
+}
+
+body.dark { background: #0d0f11; }
+
+/* ---------------------------------------------------------------- moldura */
+
+/* 480px cobre o maior iPhone (440pt): no celular o app ocupa a largura toda,
+   sem faixa cinza dos lados; no computador continua uma coluna de celular */
+#app {
+  width: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+  min-height: 100vh;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  box-shadow: 0 0 24px rgba(0, 0, 0, 0.14);
+  /* nada passa da largura da tela (clip não quebra o topo fixo, hidden quebraria) */
+  overflow-x: clip;
+}
+
+/* ------------------------------------------------ áreas seguras (iPhone)
+
+   Com viewport-fit=cover e a barra "black-translucent" o app vai até as bordas.
+   O env() de cada faixa fica na regra base de cada parte (topo, corpo, rodapé,
+   folha): um @media aqui em cima seria sobrescrito pelas regras de baixo.
+   Fora da tela cheia o env() vale 0 e nada muda. */
+@media (display-mode: standalone) {
+  /* sem seleção acidental de texto ao tocar, como um app nativo */
+  body {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  input, textarea, select {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+}
+
+/* altura dinâmica: evita a barra do Safari cobrir o rodapé */
+@supports (height: 100dvh) {
+  #app { min-height: 100dvh; }
+}
+
+/* ---------------------------------------------------------------- topo */
+
+/* O topo reserva a faixa do relógio (notch / Dynamic Island) aqui, na regra base.
+   Antes isso ficava num @media acima desta regra e era sobrescrito por ela: no
+   iPhone em tela cheia o botão de voltar ficava embaixo do relógio, sem toque. */
+header.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  height: calc(56px + env(safe-area-inset-top, 0px));
+  background: var(--orange);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  padding: env(safe-area-inset-top, 0px) calc(6px + env(safe-area-inset-right, 0px)) 0 calc(6px + env(safe-area-inset-left, 0px));
+  gap: 4px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
+}
+
+header.topbar .title {
+  flex: 1;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.iconbtn {
+  width: 44px;
+  height: 44px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.iconbtn:active { background: rgba(255, 255, 255, 0.18); }
+.iconbtn.hidden { visibility: hidden; }
+
+.topbar .report-link {
+  border: 0;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font: inherit;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  margin-right: 4px;
+}
+.topbar .report-link.hidden { visibility: hidden; }
+.topbar .report-link:active { background: rgba(255, 255, 255, 0.3); }
+
+svg { display: block; }
+
+/* ---------------------------------------------------------------- corpo */
+
+main {
+  flex: 1;
+  padding: 14px 14px calc(22px + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* logo da empresa no topo da tela inicial; no escuro ganha um quadro claro para o cinza escuro ler */
+img.logo-inhaus {
+  display: block;
+  width: 150px;
+  height: auto;
+  margin: 6px auto 2px;
+}
+
+body.dark img.logo-inhaus {
+  background: #f3f3f3;
+  border-radius: 10px;
+  padding: 6px 10px;
+  width: 170px;
+  box-sizing: border-box;
+}
+
+h1.screen-title {
+  font-size: 19px;
+  font-weight: 700;
+  margin: 4px 0 2px;
+  text-align: center;
+}
+
+.section-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+  margin: 4px 0 -2px;
+}
+
+/* ---------------------------------------------------------------- grade inicial */
+
+.action-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.action-card {
+  height: 128px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+  padding: 8px;
+  box-shadow: var(--shadow);
+  transition: transform 0.08s ease;
+}
+
+.action-card:active { transform: scale(0.97); }
+.action-card.wide { grid-column: span 2; height: 76px; flex-direction: row; background: var(--orange); color: #fff; }
+.action-card.wide svg { stroke: #fff; }
+.action-card svg { stroke: var(--orange); }
+.action-card.wide.danger-card { height: 56px; background: var(--surface); color: var(--red); }
+.action-card.wide.danger-card svg { stroke: var(--red); }
+.action-card.dark-btn { background: var(--surface); }
+
+.action-card .badge-count {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-soft);
+  background: rgba(0, 0, 0, 0.06);
+  padding: 2px 8px;
+  border-radius: 20px;
+}
+body.dark .action-card .badge-count { background: rgba(255, 255, 255, 0.09); color: var(--text-soft); }
+
+/* ---------------------------------------------------------------- histórico */
+
+.history {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.history .head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.history .head .label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+}
+
+.history .empty {
+  font-size: 12.5px;
+  color: var(--text-soft);
+  text-align: center;
+  padding: 14px 0;
+}
+
+.history .row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 2px;
+  border-top: 1px solid var(--line);
+  background: transparent;
+  border-left: 0;
+  border-right: 0;
+  border-bottom: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+}
+
+.history .row:first-of-type { border-top: 0; }
+.history .row .num { font-weight: 700; font-size: 12.5px; }
+.history .row .meta { font-size: 11px; color: var(--text-soft); }
+.history .row .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history .row .arrow { color: var(--text-soft); }
+
+/* ---------------------------------------------------------------- formulários */
+
+/* min-width: 0 deixa a coluna da grade encolher; sem isso o campo de data do
+   iPhone empurra a tela para os lados */
+.field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.field > label { font-size: 11.5px; font-weight: 600; color: var(--text-soft); }
+.field > label .req { color: var(--orange); }
+
+/* 16px nos campos: com fonte menor o iPhone amplia a página ao tocar no campo
+   e não volta sozinho (era o "tamanho de tela errado") */
+input[type="text"],
+input[type="date"],
+input[type="time"],
+input[type="number"],
+select,
+textarea {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+  padding: 10px 11px;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* data e hora no iPhone: sem aparência própria somem a altura e o alinhamento */
+input[type="date"],
+input[type="time"] {
+  display: block;
+  min-height: 44px;
+  text-align: left;
+}
+input[type="date"]::-webkit-date-and-time-value,
+input[type="time"]::-webkit-date-and-time-value { text-align: left; }
+
+input:focus, select:focus, textarea:focus { border-color: var(--orange); }
+input[readonly] { background: var(--surface); color: var(--text-soft); }
+textarea { resize: vertical; min-height: 74px; line-height: 1.45; }
+select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a0a0a0' stroke-width='3'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 11px center;
+  padding-right: 30px;
+}
+
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; }
+.form-grid .full { grid-column: span 2; }
+
+/* ---------------------------------------------------------------- botões */
+
+.btn {
+  border: 0;
+  border-radius: 10px;
+  font: inherit;
+  font-weight: 700;
+  font-size: 14px;
+  padding: 12px 16px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: filter 0.12s ease;
+}
+
+.btn:active { filter: brightness(0.94); }
+.btn.block { width: 100%; }
+.btn.primary { background: var(--orange); color: #fff; }
+.btn.ghost { background: var(--surface); color: var(--text); }
+.btn.danger { background: var(--red); color: #fff; }
+.btn.dashed {
+  background: transparent;
+  border: 1.5px dashed var(--orange);
+  color: var(--orange);
+}
+.btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.btn-row { display: flex; gap: 10px; }
+.btn-row .btn { flex: 1; }
+
+/* ---------------------------------------------------------------- cartões */
+
+.card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 11px 12px;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  box-shadow: var(--shadow);
+}
+
+.card .body { flex: 1; min-width: 0; }
+.card .name { font-weight: 600; font-size: 13.5px; }
+.card .sub { font-size: 11.5px; color: var(--text-soft); margin-top: 2px; }
+.card .del {
+  border: 0;
+  background: transparent;
+  color: var(--text-soft);
+  padding: 4px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.card .del:active { background: rgba(0, 0, 0, 0.07); }
+/* apagar relatório inteiro: alvo de toque maior e vermelho */
+.card .del-rdo { color: var(--red); min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center; }
+
+.aviso-perigo {
+  background: var(--red-soft);
+  color: var(--red);
+  border-radius: var(--radius);
+  padding: 11px 13px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.task-card { border-left: 4px solid var(--orange); }
+.task-card.done { border-left-color: var(--green); }
+
+.progress {
+  height: 7px;
+  background: var(--surface-2);
+  border-radius: 20px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+.progress > span { display: block; height: 100%; background: var(--orange); border-radius: 20px; }
+.task-card.done .progress > span { background: var(--green); }
+
+.badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 4px 8px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+.badge.green { background: var(--green-soft); color: var(--green); }
+.badge.red { background: var(--red-soft); color: var(--red); }
+.badge.amber { background: var(--amber-soft); color: var(--amber); }
+.badge.gray { background: var(--surface-2); color: var(--text-soft); }
+
+.counter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--orange-soft);
+  border-radius: var(--radius);
+  padding: 11px 13px;
+}
+
+.counter .n { font-size: 22px; font-weight: 800; color: var(--orange); line-height: 1; }
+.counter .t { font-size: 11.5px; color: var(--text-soft); font-weight: 600; }
+
+/* ---------------------------------------------------------------- fotos */
+
+.photo-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+}
+
+.photo {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface-2);
+  box-shadow: var(--shadow);
+}
+
+.photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.photo .cap {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  padding: 16px 8px 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.78));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.photo .gps {
+  position: absolute;
+  top: 5px; left: 5px;
+  font-size: 8.5px;
+  font-weight: 700;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 2px 5px;
+  border-radius: 4px;
+}
+
+.photo .rm {
+  position: absolute;
+  top: 5px; right: 5px;
+  width: 26px; height: 26px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+/* ---------------------------------------------------------------- vazio */
+
+.empty-state {
+  text-align: center;
+  color: var(--text-soft);
+  font-size: 12.5px;
+  padding: 26px 16px;
+  border: 1.5px dashed var(--line);
+  border-radius: var(--radius);
+  line-height: 1.5;
+}
+
+/* ---------------------------------------------------------------- modal */
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 100;
+  padding: 0;
+}
+
+.sheet {
+  width: 100%;
+  max-width: 480px;
+  background: var(--bg);
+  border-radius: 16px 16px 0 0;
+  padding: 16px 16px calc(20px + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  /* nunca sobe por baixo do relógio do iPhone */
+  max-height: calc(92vh - env(safe-area-inset-top, 0px));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  animation: rise 0.18s ease-out;
+}
+
+/* altura que acompanha a barra do Safari e o teclado */
+@supports (height: 100dvh) {
+  .sheet { max-height: calc(92dvh - env(safe-area-inset-top, 0px)); }
+}
+
+@keyframes rise { from { transform: translateY(14px); opacity: 0.7; } to { transform: none; opacity: 1; } }
+
+.sheet h2 { font-size: 15px; margin: 0; }
+.sheet .sheet-actions { display: flex; gap: 10px; margin-top: 2px; }
+.sheet .sheet-actions .btn { flex: 1; }
+
+/* ---------------------------------------------------------------- toast */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(26px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  background: #23262a;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 11px 16px;
+  border-radius: 10px;
+  z-index: 200;
+  max-width: 340px;
+  text-align: center;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  animation: rise 0.16s ease-out;
+}
+
+/* ---------------------------------------------------------------- resumo/relatório */
+
+.summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.summary .box {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 13px;
+  text-align: center;
+}
+
+.summary .box .n { font-size: 24px; font-weight: 800; color: var(--orange); line-height: 1.1; }
+.summary .box .t { font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-soft); margin-top: 3px; }
+
+.info-list {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 4px 12px;
+}
+
+.info-list .li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+  border-top: 1px solid var(--line);
+  font-size: 12.5px;
+}
+.info-list .li:first-child { border-top: 0; }
+.info-list .li .k { color: var(--text-soft); }
+.info-list .li .v { font-weight: 600; text-align: right; }
+
+/* ---------------------------------------------------------------- rodapé */
+
+footer.brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 16px 0 calc(22px + env(safe-area-inset-bottom, 0px));
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-soft);
+}
+
+footer.brand .fg { color: var(--orange); }
+footer.brand .rdo { color: var(--blue); }
+
+.theme-toggle {
+  display: flex;
+  justify-content: center;
+  padding-bottom: 8px;
+}
+
+.install-slot {
+  padding: 0 14px 4px;
+}
+
+.install-slot:empty { display: none; }
+
+.install-slot .btn {
+  border: 1px solid var(--orange);
+  color: var(--orange);
+  background: transparent;
+}

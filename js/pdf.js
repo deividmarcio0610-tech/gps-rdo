@@ -1,0 +1,189 @@
+/* PDF A4 conforme item 4 da especificação: jsPDF + autotable, laranja e cinza. */
+window.Pdf = (() => {
+  'use strict';
+
+  const ORANGE = [255, 87, 34];
+  const GRAY = [243, 243, 243];
+
+  const fmtDate = (iso) => {
+    const [a, m, d] = String(iso || '').slice(0, 10).split('-');
+    return a ? `${d}/${m}/${a}` : '—';
+  };
+
+  async function gerar(rdo) {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
+    const larg = doc.internal.pageSize.getWidth();
+    const alt = doc.internal.pageSize.getHeight();
+    const margem = 14;
+    let y = 0;
+
+    // 1. faixa laranja no topo
+    doc.setFillColor(...ORANGE);
+    doc.rect(0, 0, larg, 25, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(15);
+    doc.text('RELATÓRIO DIÁRIO DE OBRA', larg / 2, 15.5, { align: 'center' });
+    doc.setFontSize(8.5);
+    doc.text(String(window.Store.config.companyName || '').toUpperCase(), larg / 2, 21, { align: 'center' });
+    // logo In-Haus: a faixa é laranja e a logo também, então ela vai sobre um quadro branco
+    if (window.Logo) {
+      const caixaL = 30;
+      const caixaA = 17;
+      const x0 = larg - margem - caixaL;
+      doc.setFillColor(255, 255, 255);
+      doc.roundedRect(x0, 4, caixaL, caixaA, 1.5, 1.5, 'F');
+      const altLogo = 13;
+      const largLogo = altLogo * (window.Logo.largura / window.Logo.altura);
+      doc.addImage(window.Logo.src, 'PNG', x0 + (caixaL - largLogo) / 2, 4 + (caixaA - altLogo) / 2, largLogo, altLogo);
+    }
+    y = 33;
+
+    // 2. identificação
+    doc.setTextColor(30, 30, 30);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    // só entra o que foi preenchido: campo vazio não vira texto inventado no PDF
+    const juntar = (partes, sep = '  ·  ') => partes.filter(Boolean).join(sep);
+    doc.text(juntar([`RDO Nº ${rdo.number}`, fmtDate(rdo.date), rdo.shift && `Turno ${rdo.shift}`]), margem, y);
+    y += 6;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9.5);
+    doc.setTextColor(90, 90, 90);
+    const linhas = [
+      // local / mina digitado à mão: pode ser longo, quebra na largura da página
+      juntar([rdo.location && `Local: ${rdo.location}`, rdo.weather && `Clima: ${rdo.weather}`]),
+      juntar([
+        rdo.supervisor && `Supervisor: ${rdo.supervisor}`,
+        (rdo.startTime || rdo.endTime) && `${rdo.startTime || '—'} às ${rdo.endTime || '—'}`,
+      ], '   ·   '),
+    ].filter(Boolean);
+    for (const linha of linhas) {
+      for (const parte of doc.splitTextToSize(linha, larg - margem * 2)) {
+        doc.text(parte, margem, y);
+        y += 3.5;
+      }
+    }
+    doc.setDrawColor(...ORANGE);
+    doc.setLineWidth(0.7);
+    doc.line(margem, y + 1, larg - margem, y + 1);
+    y += 7;
+
+    const tabela = (titulo, cols, corpo, opts = {}) => {
+      if (!corpo.length) return;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9.5);
+      doc.setTextColor(...(opts.headColor || ORANGE));
+      doc.text(titulo, margem, y);
+      y += 2.5;
+      doc.autoTable({
+        startY: y,
+        margin: { left: margem, right: margem },
+        head: [cols],
+        body: corpo,
+        theme: 'grid',
+        styles: { font: 'helvetica', fontSize: 8.5, cellPadding: 2, textColor: [40, 40, 40], lineColor: [220, 220, 220], lineWidth: 0.15 },
+        headStyles: { fillColor: opts.headColor || ORANGE, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8.5 },
+        alternateRowStyles: { fillColor: GRAY },
+        columnStyles: opts.columnStyles || {},
+        didParseCell: (data) => {
+          if (data.section === 'body' && opts.colorir) {
+            const cor = opts.colorir(data.row.index, data.column.index, data.cell);
+            if (cor) { data.cell.styles.textColor = cor.texto; data.cell.styles.fontStyle = 'bold'; }
+          }
+        },
+      });
+      y = doc.lastAutoTable.finalY + 7;
+    };
+
+    // 3. mão de obra
+    tabela(
+      '1. MÃO DE OBRA',
+      ['Nome', 'Função', 'Equipe', 'Status'],
+      rdo.workforce.map((w) => [w.name, w.role || '—', w.team || '—', w.status]),
+      {
+        columnStyles: { 0: { cellWidth: 62 }, 1: { cellWidth: 45 }, 2: { cellWidth: 45 } },
+        colorir: (linha, coluna, cell) => {
+          if (coluna !== 3 || cell.text[0] !== 'Falta') return null;
+          return { texto: [198, 40, 40] };
+        },
+      },
+    );
+
+    // 4. equipamentos
+    tabela(
+      '2. EQUIPAMENTOS',
+      ['Equipamento', 'Código', 'Status', 'Horímetro'],
+      rdo.equipmentList.map((e) => {
+        const h = (v) => (v == null || v === '' ? '—' : `${v}h`);
+        return [e.name, e.code || '—', e.status || '—', `${h(e.hoursStart)} - ${h(e.hoursEnd)}`];
+      }),
+      { columnStyles: { 0: { cellWidth: 62 }, 3: { halign: 'right', cellWidth: 34 } } },
+    );
+
+    // 5. atividades
+    tabela(
+      '3. ATIVIDADES REALIZADAS',
+      ['OS', 'Descrição', 'Progresso', 'Status'],
+      rdo.tasks.map((t) => [t.os || '—', t.description, `${Number(t.progress) || 0}%`, t.status || '—']),
+      {
+        columnStyles: { 0: { cellWidth: 26 }, 1: { cellWidth: 80 }, 2: { halign: 'right', cellWidth: 22 } },
+        colorir: (linha, coluna, cell) => {
+          if (coluna !== 3) return null;
+          return cell.text[0] === 'Concluído' ? { texto: [46, 125, 50] } : { texto: [178, 106, 0] };
+        },
+      },
+    );
+
+    // 6. ocorrências — cabeçalho vermelho, omitida quando vazia
+    tabela(
+      '4. OCORRÊNCIAS',
+      ['Tipo', 'Descrição', 'Hora'],
+      rdo.occurrences.map((o) => [o.type, o.description, o.time || '—']),
+      {
+        headColor: [198, 40, 40],
+        columnStyles: { 0: { cellWidth: 32 }, 2: { halign: 'right', cellWidth: 20 } },
+      },
+    );
+
+    // 7. assinaturas
+    const baseAssinatura = Math.max(y + 20, 250);
+    const yAssinatura = Math.min(baseAssinatura, alt - 30);
+    const meio = larg / 2;
+    doc.setDrawColor(90, 90, 90);
+    doc.setLineWidth(0.3);
+    doc.line(margem + 6, yAssinatura, meio - 10, yAssinatura);
+    doc.line(meio + 10, yAssinatura, larg - margem - 6, yAssinatura);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(70, 70, 70);
+    doc.text('Assinatura do Supervisor', (margem + 6 + meio - 10) / 2, yAssinatura + 5, { align: 'center' });
+    doc.text('Assinatura do Fiscal/Cliente', (meio + 10 + larg - margem - 6) / 2, yAssinatura + 5, { align: 'center' });
+
+    // rodapé
+    doc.setFontSize(7.5);
+    doc.setTextColor(140, 140, 140);
+    doc.text(
+      juntar([window.Store.config.companyName, `RDO ${rdo.number}`, fmtDate(rdo.date)], ' · '),
+      larg / 2, alt - 8, { align: 'center' },
+    );
+
+    const nome = `RDO_${rdo.number}.pdf`;
+    const plugins = window.Capacitor?.isNativePlatform?.() ? window.Capacitor.Plugins : null;
+    if (plugins?.Filesystem && plugins?.Share) {
+      // no APK o WebView não baixa blob: grava no cache e abre o compartilhar do Android
+      const base64 = doc.output('datauristring').split(',')[1];
+      const arq = await plugins.Filesystem.writeFile({ path: nome, data: base64, directory: 'CACHE' });
+      try {
+        await plugins.Share.share({ title: nome, files: [arq.uri], dialogTitle: 'Salvar ou enviar o PDF' });
+      } catch (err) {
+        if (!/cancel/i.test(String(err?.message || err))) throw err;
+      }
+      return;
+    }
+    doc.save(nome);
+  }
+
+  return { gerar };
+})();
