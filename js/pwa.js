@@ -26,6 +26,16 @@ window.Pwa = (() => {
     // precisa de https ou localhost; em file:// não há service worker
     if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') return;
 
+    // versão nova assumiu (site atualizado ou APK instalado por cima): recarrega uma vez para
+    // não ficar mostrando a versão velha até a próxima abertura. Na primeira instalação não.
+    const tinhaVersao = Boolean(navigator.serviceWorker.controller);
+    let recarregou = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!tinhaVersao || recarregou) return;
+      recarregou = true;
+      location.reload();
+    });
+
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('sw.js').then((reg) => {
         // quando houver versão nova, ativa sem recarregar na cara do usuário
