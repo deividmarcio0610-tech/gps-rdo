@@ -87,6 +87,19 @@ window.UI = (() => {
       scrim.className = 'scrim';
       const campos = fields.map((f, i) => {
         const id = `f_${i}`;
+        // lista de marcar, em grupos (ex.: escolher da equipe); volta o array dos valores marcados
+        if (f.type === 'checks') {
+          return `<div class="checks" data-checks="${esc(f.key)}">${(f.grupos || []).map((g, gi) => `
+            <div class="checks-grupo">
+              <div class="checks-titulo"><span>${esc(g.titulo)}</span>
+                <button type="button" class="btn ghost" data-act="todos" data-grupo="${gi}">Marcar todos</button></div>
+              ${g.itens.map((it) => `
+                <label class="check${it.disabled ? ' off' : ''}" data-grupo="${gi}">
+                  <input type="checkbox" value="${esc(it.value)}"${it.checked ? ' checked' : ''}${it.disabled ? ' disabled' : ''}>
+                  <span>${esc(it.label)}</span>${it.nota ? `<small>${esc(it.nota)}</small>` : ''}
+                </label>`).join('')}
+            </div>`).join('')}</div>`;
+        }
         if (f.type === 'select') {
           const opts = (f.options || []).map((o) => {
             const val = typeof o === 'string' ? o : o.value;
@@ -119,14 +132,24 @@ window.UI = (() => {
       abertas.add(cancelar);
       scrim.addEventListener('click', (e) => {
         if (e.target === scrim) fechar(null);
-        const act = e.target.closest('[data-act]')?.dataset.act;
+        const alvo = e.target.closest('[data-act]');
+        const act = alvo?.dataset.act;
         if (act === 'cancel') fechar(null);
+        if (act === 'todos') {
+          // marca o grupo inteiro; se já estava tudo marcado, desmarca
+          const caixas = [...scrim.querySelectorAll(`label.check[data-grupo="${alvo.dataset.grupo}"] input:not(:disabled)`)];
+          const marcar = caixas.some((c) => !c.checked);
+          caixas.forEach((c) => { c.checked = marcar; });
+        }
         if (act === 'ok') {
           const valores = {};
           scrim.querySelectorAll('[data-key]').forEach((el) => {
             // número em branco volta '' (não 0): campo não preenchido fica sem valor
             if (el.type === 'number') valores[el.dataset.key] = el.value === '' ? '' : Number(el.value);
             else valores[el.dataset.key] = el.value.trim();
+          });
+          scrim.querySelectorAll('[data-checks]').forEach((bloco) => {
+            valores[bloco.dataset.checks] = [...bloco.querySelectorAll('input:checked:not(:disabled)')].map((c) => c.value);
           });
           fechar(valores);
         }

@@ -17,6 +17,7 @@ window.Screens = (() => {
     report: 'Gerar Relatório',
     reports: 'Apagar Relatórios',
     backup: 'Cópia de Segurança',
+    roster: 'Cadastro da Equipe',
     stops: 'Horas Paradas',
     month: 'Resumo do Mês',
   };
@@ -298,11 +299,16 @@ window.Screens = (() => {
       html: `
         <div class="counter">
           <div><div class="n">${presentes}</div><div class="t">presente(s) de ${rdo.workforce.length}</div></div>
-          ${trava ? '' : `<button class="btn primary" data-act="add">${icon('plus', 16)}Adicionar</button>`}
+          ${trava ? '' : `<button class="btn primary" data-act="escolher">${icon('users', 16)}Escolher da equipe</button>`}
         </div>
-        ${trava ? avisoTravado(rdo) : botaoCopiar(rdo, 'workforce', 'a equipe')}
+        ${trava ? avisoTravado(rdo) : `
+          <div class="btn-row">
+            <button class="btn ghost" data-act="add">${icon('plus', 16)}Outra pessoa</button>
+            <button class="btn ghost" data-act="cadastro">${icon('file', 16)}Cadastro da equipe</button>
+          </div>
+          ${botaoCopiar(rdo, 'workforce', 'a equipe')}`}
         ${rdo.workforce.length === 0
-          ? '<div class="empty-state">Nenhuma pessoa registrada.<br>Use <strong>Adicionar</strong> para incluir a equipe do dia.</div>'
+          ? '<div class="empty-state">Nenhuma pessoa no RDO.<br>Use <strong>Escolher da equipe</strong> e marque quem está presente hoje.</div>'
           : rdo.workforce.map((w) => `
             <div class="card">
               <button class="body editar" data-editar="${esc(w.id)}"${trava ? ' disabled' : ''}>
@@ -316,8 +322,38 @@ window.Screens = (() => {
         ${rdo.workforce.length && !trava ? '<p class="dica">Toque no nome para corrigir e na presença para trocar entre Presente e Falta.</p>' : ''}`,
       bind(root) {
         if (trava) return;
+        root.querySelector('[data-act="cadastro"]').addEventListener('click', () => app.go('roster'));
+
+        // escolher da equipe: lista de marcar por equipe; quem já está no RDO aparece travado
+        root.querySelector('[data-act="escolher"]').addEventListener('click', async () => {
+          const noRdo = new Set(rdo.workforce.map((w) => w.name.trim().toLowerCase()));
+          const grupos = Store.equipe.map((g) => ({
+            titulo: g.equipe,
+            itens: g.pessoas.map((p) => {
+              const ja = noRdo.has(p.name.trim().toLowerCase());
+              return { value: `${p.team}|${p.name}`, label: p.name, checked: ja, disabled: ja, nota: ja ? 'já no RDO' : (p.role || '') };
+            }),
+          }));
+          const valores = await sheet({
+            title: 'Quem está presente hoje?',
+            text: 'Marque as pessoas. Elas entram como Presente; toque no selo depois para trocar para Falta.',
+            fields: [{ key: 'pessoas', type: 'checks', grupos }],
+            submit: 'Adicionar marcados',
+          });
+          if (!valores || !valores.pessoas?.length) return;
+          const todos = Store.equipe.flatMap((g) => g.pessoas);
+          Store.update(rdo.id, (d) => {
+            valores.pessoas.forEach((chave) => {
+              const p = todos.find((x) => `${x.team}|${x.name}` === chave);
+              if (p) d.workforce.push({ id: Store.uid(), name: p.name, role: p.role || '', team: p.team, status: 'Presente', hours: null });
+            });
+          });
+          toast(`${valores.pessoas.length} pessoa(s) adicionada(s).`);
+          app.render();
+        });
+
         root.querySelector('[data-act="add"]').addEventListener('click', async () => {
-          // tudo digitado: sem cadastro de pessoas e sem presença ou horas marcadas
+          // pessoa fora da equipe: digitada, sem presença ou horas marcadas
           const valores = await sheet({ title: 'Adicionar pessoa', fields: campos(), submit: 'Adicionar' });
           const pessoa = valores && ler(valores);
           if (!pessoa) return;
@@ -1037,6 +1073,64 @@ window.Screens = (() => {
     };
   }
 
+  // -------------------------------------------------------------- cadastro da equipe
+
+  function roster() {
+    const grupos = Store.equipe;
+    return {
+      titulo: TITULOS.roster,
+      html: `
+        <button class="btn primary block" data-act="add">${icon('plus', 16)}Acrescentar pessoa</button>
+        <p class="dica">As equipes fixas ficam sempre no app. Quem você acrescentar fica guardado neste
+          aparelho (e vai na cópia de segurança). Para pôr alguém no RDO, use <strong>Escolher da equipe</strong> na Mão de Obra.</p>
+        ${grupos.map((g) => `
+          <div class="history">
+            <div class="head"><span class="label">${esc(g.equipe)} · ${g.pessoas.length}</span></div>
+            ${g.pessoas.map((p) => `
+              <div class="row pessoa">
+                <div class="grow">
+                  <div class="num">${esc(p.name)}</div>
+                  ${p.role ? `<div class="meta">${esc(p.role)}</div>` : ''}
+                </div>
+                ${p.fixa
+                  ? `<span class="badge gray">${icon('lock', 11)} fixo</span>`
+                  : `<button class="del" data-tirar="${esc(p.id)}" aria-label="Tirar ${esc(p.name)} do cadastro">${icon('trash', 17)}</button>`}
+              </div>`).join('')}
+          </div>`).join('')}`,
+      bind(root) {
+        root.querySelector('[data-act="add"]').addEventListener('click', async () => {
+          const NOVA = '__nova__';
+          const valores = await sheet({
+            title: 'Acrescentar pessoa',
+            fields: [
+              { key: 'name', label: 'Nome', placeholder: 'Nome' },
+              { key: 'team', label: 'Equipe', type: 'select', options: [{ value: '', label: 'Selecione' }, ...grupos.map((g) => g.equipe), { value: NOVA, label: 'Outra equipe (digitar)' }] },
+              { key: 'novaEquipe', label: 'Nome da outra equipe (se escolheu "Outra equipe")', placeholder: 'Ex.: Equipe 3' },
+              { key: 'role', label: 'Função (opcional)', placeholder: 'Função' },
+            ],
+            submit: 'Acrescentar',
+          });
+          if (!valores) return;
+          if (!valores.name) { toast('Informe o nome.'); return; }
+          const equipe = valores.team === NOVA ? valores.novaEquipe : valores.team;
+          if (!equipe) { toast('Escolha a equipe.'); return; }
+          if (!Store.adicionarPessoa(valores.name, equipe, valores.role)) { toast('Essa pessoa já está nessa equipe.'); return; }
+          toast(`${valores.name} acrescentado(a) em ${equipe}.`);
+          app.render();
+        });
+
+        root.querySelectorAll('[data-tirar]').forEach((b) => {
+          b.addEventListener('click', async () => {
+            const ok = await confirmar('Tirar do cadastro', 'Tirar esta pessoa do cadastro? Os RDOs em que ela já está não mudam.', 'Tirar');
+            if (!ok) return;
+            Store.removerPessoa(b.dataset.tirar);
+            app.render();
+          });
+        });
+      },
+    };
+  }
+
   // -------------------------------------------------------------- resumo do mês
 
   let mesEscolhido = '';  // "AAAA-MM"; vazio = mês de hoje
@@ -1136,7 +1230,8 @@ window.Screens = (() => {
               }
               rdos.push(copia);
             }
-            const dados = { app: 'GPS-RDO', tipo: 'copia-de-seguranca', versao: 1, geradoEm: new Date().toISOString(), ultimos: Store.all.ultimos || {}, rdos };
+            // vai junto quem foi acrescentado à equipe (a equipe fixa já vem no app)
+            const dados = { app: 'GPS-RDO', tipo: 'copia-de-seguranca', versao: 1, geradoEm: new Date().toISOString(), ultimos: Store.all.ultimos || {}, equipe: Store.employees || [], rdos };
             return {
               blob: new Blob([JSON.stringify(dados)], { type: 'application/json' }),
               nome: `GPS-RDO-copia-${Store.todayIso()}.json`,
@@ -1161,8 +1256,14 @@ window.Screens = (() => {
             toast('Esse arquivo não é uma cópia do GPS-RDO.');
             return;
           }
+          // gente acrescentada à equipe: entra quem ainda não está (adicionarPessoa ignora repetidos)
+          const pessoas = (Array.isArray(dados.equipe) ? dados.equipe : [])
+            .filter((p) => p?.name && Store.adicionarPessoa(p.name, p.team, p.role)).length;
           const novos = dados.rdos.filter((r) => r?.id && !Store.find(r.id));
-          if (!novos.length) { toast('Todos os RDOs dessa cópia já estão neste aparelho.'); return; }
+          if (!novos.length) {
+            toast(pessoas ? `${pessoas} pessoa(s) voltaram para a equipe. Os RDOs dessa cópia já estão aqui.` : 'Todos os RDOs dessa cópia já estão neste aparelho.');
+            return;
+          }
           const ok = await confirmar('Restaurar cópia',
             `Trazer ${novos.length} RDO(s) da cópia de ${fmtDate(String(dados.geradoEm).slice(0, 10))}? Os que já estão aqui ficam como estão.`, 'Restaurar');
           if (!ok) return;
@@ -1183,7 +1284,7 @@ window.Screens = (() => {
     };
   }
 
-  const mapa = { home, header, workforce, equipment, tasks, occurrences, stops, photos, report, reports, backup, month };
+  const mapa = { home, header, workforce, equipment, tasks, occurrences, stops, photos, report, reports, backup, month, roster };
 
   return {
     boot(appRef) { app = appRef; },

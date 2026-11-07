@@ -4,14 +4,24 @@ window.Store = (() => {
 
   const KEY = 'rdo_digital_db_v1';
 
-  // Nada vem preenchido: sem pessoas, equipamentos, contrato ou empresa de exemplo.
-  // Tudo o que aparece no RDO é digitado por quem preenche.
+  /*
+   * Equipe fixa (pedido do usuário em 07/11/2026): aparece sempre para escolher na Mão de
+   * Obra e não sai do cadastro. Ninguém entra no RDO sozinho: quem preenche marca os presentes.
+   * Gente a mais fica em `employees`, no aparelho.
+   */
+  const EQUIPE_FIXA = [
+    { equipe: 'Equipe 1', nomes: ['Joao', 'Lucas', 'Danilo', 'Gerson', 'Jean', 'Vinicius', 'Luiz Fernando'] },
+    { equipe: 'Equipe 2', nomes: ['Diego', 'Diemerson', 'Irlan', 'Anderson', 'Everton', 'Valdir', 'Claudiney'] },
+  ];
+
+  // Nada vem preenchido no RDO: sem equipamentos, contrato ou empresa de exemplo.
+  // Tudo o que aparece no RDO é escolhido ou digitado por quem preenche.
   const seed = () => ({
     config: { companyName: '', logoUrl: '', darkMode: false },
     rdos: [],
     // maior número já dado em cada dia (AAAAMMDD → NN): apagar um RDO não libera o número dele
     ultimos: {},
-    employees: [],
+    employees: [],  // gente acrescentada pelo usuário além da equipe fixa: { id, name, team, role }
     equipment: [],
     contracts: [],
   });
@@ -185,6 +195,41 @@ window.Store = (() => {
 
     find(id) { return db.rdos.find((r) => r.id === id) || null; },
     get recentes() { return db.rdos.slice(0, 3); },
+
+    /** Equipe para escolher na Mão de Obra: os fixos de cada equipe e os acrescentados no aparelho. */
+    get equipe() {
+      const grupos = EQUIPE_FIXA.map((g) => ({
+        equipe: g.equipe,
+        pessoas: g.nomes.map((name) => ({ name, team: g.equipe, role: '', fixa: true })),
+      }));
+      (db.employees || []).forEach((e) => {
+        const nomeEquipe = e.team || 'Outros';
+        let g = grupos.find((x) => x.equipe === nomeEquipe);
+        if (!g) { g = { equipe: nomeEquipe, pessoas: [] }; grupos.push(g); }
+        g.pessoas.push({ id: e.id, name: e.name, team: nomeEquipe, role: e.role || '', fixa: false });
+      });
+      return grupos;
+    },
+
+    /** Acrescenta alguém à equipe (fica no aparelho). Devolve false se já existe na mesma equipe. */
+    adicionarPessoa(name, team, role = '') {
+      const nome = String(name || '').trim();
+      const equipe = String(team || '').trim() || 'Outros';
+      if (!nome) return false;
+      const igual = (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase();
+      const grupo = this.equipe.find((g) => igual(g.equipe, equipe));
+      if (grupo?.pessoas.some((p) => igual(p.name, nome))) return false;
+      db.employees = db.employees || [];
+      db.employees.push({ id: uid(), name: nome, team: grupo?.equipe || equipe, role: String(role || '').trim() });
+      return save();
+    },
+
+    /** Tira do cadastro alguém acrescentado. A equipe fixa não sai. */
+    removerPessoa(id) {
+      const antes = (db.employees || []).length;
+      db.employees = (db.employees || []).filter((e) => e.id !== id);
+      return db.employees.length < antes && save();
+    },
 
     /** Número novo para outra data (a data do cabeçalho mudou): o número sempre acompanha a data. */
     numeroPara(dataIso) {

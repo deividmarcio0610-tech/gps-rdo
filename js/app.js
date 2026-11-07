@@ -18,7 +18,7 @@
   };
 
   // telas que funcionam sem um RDO aberto (a de apagar não pode recriar o que acabou de sumir)
-  const SEM_RDO = new Set(['home', 'reports', 'backup', 'month']);
+  const SEM_RDO = new Set(['home', 'reports', 'backup', 'month', 'roster']);
 
   // APK sempre da última versão publicada no GitHub (fora do service worker do site)
   const APK_URL = 'https://github.com/deividmarcio0610-tech/gps-rdo/releases/latest/download/GPS-RDO.apk';
@@ -229,7 +229,7 @@
 
   // atalhos do manifest (?abrir=photos / ?abrir=report)
   const atalho = new URLSearchParams(location.search).get('abrir');
-  const telasValidas = ['header', 'workforce', 'equipment', 'tasks', 'occurrences', 'stops', 'photos', 'report', 'reports', 'backup', 'month'];
+  const telasValidas = ['header', 'workforce', 'equipment', 'tasks', 'occurrences', 'stops', 'photos', 'report', 'reports', 'backup', 'month', 'roster'];
   if (atalho && telasValidas.includes(atalho)) {
     estado.pilha.push(atalho);
     marcar(false);

@@ -517,6 +517,27 @@ body.campo .toast { zoom: 1.15; }
 body.campo { --text-soft: #3b3f46; --line: #b5b9c0; }
 body.campo.dark { --text-soft: #d0d3d8; --line: #4d535c; }
 
+/* escolher da equipe: lista de marcar por grupo */
+.checks { display: flex; flex-direction: column; gap: 12px; }
+.checks-grupo { background: var(--surface); border-radius: var(--radius); padding: 8px 10px; }
+.checks-titulo {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-soft);
+  padding: 2px 2px 6px;
+}
+.checks-titulo .btn { padding: 5px 9px; font-size: 11px; text-transform: none; letter-spacing: 0; }
+label.check {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 4px; border-top: 1px solid var(--line);
+  font-size: 15px; cursor: pointer;
+}
+label.check input { width: 22px; height: 22px; accent-color: var(--orange); flex: 0 0 auto; }
+label.check span { flex: 1; }
+label.check small { font-size: 11px; color: var(--text-soft); }
+label.check.off { opacity: 0.55; }
+.history .row.pessoa { cursor: default; }
+.badge svg { display: inline-block; vertical-align: -1px; }
+
 /* filtro das listas de RDO: data e tipo lado a lado */
 .filtro {
   display: grid;
