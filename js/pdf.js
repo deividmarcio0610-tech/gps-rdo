@@ -230,21 +230,7 @@ window.Pdf = (() => {
       y += linhaA + 3;
     }
 
-    // 7. assinaturas: na mesma página se couber, senão numa página nova
-    if (y + 20 > alt - 30) { doc.addPage(); y = 30; }
-    const yAssinatura = doc.getNumberOfPages() === 1
-      ? Math.min(Math.max(y + 20, 250), alt - 30)
-      : Math.min(y + 20, alt - 30);
-    const meio = larg / 2;
-    doc.setDrawColor(90, 90, 90);
-    doc.setLineWidth(0.3);
-    doc.line(margem + 6, yAssinatura, meio - 10, yAssinatura);
-    doc.line(meio + 10, yAssinatura, larg - margem - 6, yAssinatura);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8);
-    doc.setTextColor(70, 70, 70);
-    doc.text('Assinatura do Supervisor', (margem + 6 + meio - 10) / 2, yAssinatura + 5, { align: 'center' });
-    doc.text('Assinatura do Fiscal/Cliente', (meio + 10 + larg - margem - 6) / 2, yAssinatura + 5, { align: 'center' });
+    // sem linhas de assinatura (pedido do usuário em 07/11/2026): o PDF termina nas fotos
 
     // rodapé em todas as páginas: número do RDO, data e página
     rodape(doc, [window.Store.config.companyName, `RDO ${rdo.number}`, fmtDate(rdo.date), rdo.status === 'final' && 'finalizado']);
