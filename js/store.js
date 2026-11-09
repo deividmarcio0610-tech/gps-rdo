@@ -243,6 +243,8 @@ window.Store = (() => {
           funcao: conta.funcao || '',
           email: conta.email || '',
           foto: conta.facial || '',
+          // assinatura desenhada no cadastro: vai no campo "Ass:" do supervisor no PDF
+          assinatura: conta.assinatura || '',
         };
       }
       marcarNumero(rdo.number);

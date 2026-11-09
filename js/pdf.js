@@ -6,7 +6,7 @@ window.Pdf = (() => {
   const GRAY = [243, 243, 243];
 
   // formulário "RDO ADM": laranja do cliente, linhas pretas finas, texto preto
-  const LARANJA = [247, 150, 70];
+  const LARANJA = [228, 108, 10];
   const CINZA = [242, 242, 242];
   const TINTA = [25, 25, 25];
   const PAD = 1.6;
@@ -56,33 +56,61 @@ window.Pdf = (() => {
     }
   }
 
+  // ---------------------------------------------------------------- formulário RDO ADM
+  // Geometria da aba "RDO ADM" do modelo do cliente, na escala A4 (impressão a 66%):
+  // colunas B..M e as 54 linhas, em mm. Cada folha do PDF é uma página do modelo.
+  const LETRAS = 'BCDEFGHIJKLM';
+  const XS = COLUNAS.reduce((a, w) => { a.push(a[a.length - 1] + w); return a; }, [10]);
+  const ALTURAS = [
+    8.72, 3.52, 6.21, 6.21, 10.57, 3.52, 3.52, // 1-7: cabeçalho
+    ...Array(8).fill(4.19), 4.03, // 8-15: etapas, 16: observações/desvios
+    ...Array(24).fill(5.58), // 17-40: quatro blocos de OM com seis linhas
+    10.07, ...Array(8).fill(4.70), // 41: observações, 42-49: equipe
+    5.03, 5.37, 5.70, 2.90, 4.53, // 50-54: supervisor, assinatura, faixa, rodapé
+  ];
+  const TOPO = 5;
+  const YS = ALTURAS.reduce((a, h) => { a.push(a[a.length - 1] + h); return a; }, [TOPO]);
+  const FINA = 0.15;
+  const GROSSA = 0.5;
+  const BRANCO = [255, 255, 255];
+  /** Retângulo das colunas a..b nas linhas r1..r2 (como uma mescla do Excel). */
+  const area = (a, b, r1, r2 = r1) => {
+    const i = LETRAS.indexOf(a);
+    const j = LETRAS.indexOf(b) + 1;
+    return [XS[i], YS[r1 - 1], XS[j] - XS[i], YS[r2] - YS[r1 - 1]];
+  };
+
+  // Dados fixos impressos no modelo do cliente.
+  const CONTRATO = '5900133256';
+  const EMPRESA_RODAPE = 'IN-HAUS INDUSTRIAL  SERVIÇOS E LOGISTICA        CNPJ:  05.208.211/0008-04';
+  const PREFIXO_OM = 'Nº OM / TÍTULO / LOCAL / DESCRIÇÃO DETALHADA : ';
+  // horários da grade do modelo; valem quando a etapa não tem horário no RDO
+  const HORAS_MODELO = [
+    ['07:45', '08:00'], ['08:00', '08:05'], ['08:05', '08:15'], ['08:15', '09:25'],
+    ['09:25', '09:27'], ['09:27', '09:30'], ['09:30', '15:30'], ['11:00', '12:00'],
+  ];
+  const OM_POR_FOLHA = 4;
+  const PESSOAS_POR_FOLHA = 7;
+  const LINHAS_NOTA_OM = 4;
+
   /**
-   * Rodapé do formulário em todas as páginas: empresa, CNPJ e, embaixo, de qual RDO é a
-   * página. `paginas` liga cada página ao RDO dela (PDF de um dia ou de um período).
+   * Rodapé de controle em todas as páginas, abaixo da folha: de qual RDO é a página e
+   * "página n de N". O texto da empresa e o CNPJ ficam na própria folha (linha 54).
    */
   function rodapeFormulario(doc, paginas) {
     const larg = doc.internal.pageSize.getWidth();
     const alt = doc.internal.pageSize.getHeight();
     const total = doc.getNumberOfPages();
-    const empresa = String(window.Store.config.companyName || '').trim();
     for (let p = 1; p <= total; p += 1) {
       doc.setPage(p);
       const info = paginas.find((x) => p >= x.de && p <= x.ate);
-      doc.setDrawColor(0, 0, 0);
-      doc.setLineWidth(0.2);
-      doc.line(10, alt - 16, larg - 10, alt - 16);
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(7.5);
-      doc.setTextColor(...TINTA);
-      doc.text(empresa.toUpperCase(), 10, alt - 11.5);
-      const cnpj = String(info?.rdo?.cnpj ?? window.Store.config.cnpj ?? '').trim();
-      if (cnpj) doc.text(`CNPJ: ${cnpj}`, larg - 10, alt - 11.5, { align: 'right' });
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(7);
-      doc.setTextColor(90, 90, 90);
       const linha = [info?.rdo?.number && `RDO ${info.rdo.number}`, info?.rdo?.date && fmtDate(info.rdo.date), total > 1 && `página ${p} de ${total}`]
         .filter(Boolean).join(' · ');
-      if (linha) doc.text(linha, larg / 2, alt - 7.5, { align: 'center' });
+      if (!linha) continue;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(6);
+      doc.setTextColor(110, 110, 110);
+      doc.text(linha, larg - 10, alt - 3, { align: 'right' });
     }
   }
 
@@ -92,122 +120,293 @@ window.Pdf = (() => {
     return new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
   }
 
-  /** Célula do formulário: quadro com borda, fundo opcional e texto que cabe na largura. */
+  /**
+   * Célula do formulário: quadro com borda (opcional), fundo opcional e texto. O texto que
+   * não cabe diminui a fonte até o mínimo e, se ainda assim não couber, é cortado com "…".
+   * Devolve true quando cortou: quem chama manda o texto inteiro para a continuação.
+   */
   function celula(doc, x, y, w, h, texto, o = {}) {
-    const size = o.size || 8;
     if (o.fill) {
       doc.setFillColor(...o.fill);
       doc.rect(x, y, w, h, 'F');
     }
+    if (o.borda !== false) {
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(FINA);
+      doc.rect(x, y, w, h, 'S');
+    }
+    const txt = texto == null ? '' : String(texto).replace(/\r/g, '').trim();
+    if (!txt) return false;
+    const pad = o.pad ?? 0.9;
+    const largura = Math.max(2, w - pad * 2);
+    const cor = o.color || TINTA;
+    doc.setFont(o.font || 'helvetica', o.bold ? 'bold' : 'normal');
+    doc.setTextColor(...cor);
+    // texto enorme nunca cabe: mede só o começo (o resto vai inteiro para a continuação)
+    const amostra = txt.length > 6000 ? txt.slice(0, 6000) : txt;
+    let size = o.size || 7;
+    const minimo = Math.min(size, o.min || 5);
+    let linhas;
+    let lh;
+    let cabem;
+    for (;;) {
+      doc.setFontSize(size);
+      linhas = doc.splitTextToSize(amostra, largura);
+      lh = size * 0.3528 * 1.12;
+      cabem = Math.max(1, Math.floor((h - 0.3) / lh));
+      if (linhas.length <= cabem || size - 0.25 < minimo) break;
+      size -= 0.25;
+    }
+    let cortado = amostra !== txt;
+    if (linhas.length > cabem || cortado) {
+      cortado = true;
+      linhas = linhas.slice(0, cabem);
+      let ultima = linhas[linhas.length - 1] || '';
+      while (ultima && doc.getTextWidth(`${ultima}…`) > largura) ultima = ultima.slice(0, -1);
+      linhas[linhas.length - 1] = `${ultima.trimEnd()}…`;
+    }
+    const asc = size * 0.3528;
+    const base = o.valign === 'top'
+      ? y + pad * 0.5 + asc * 0.85
+      : y + h / 2 - ((linhas.length - 1) * lh) / 2 + asc * 0.33;
+    const align = o.align || 'left';
+    const tx = align === 'center' ? x + w / 2 : align === 'right' ? x + w - pad : x + pad;
+    linhas.forEach((l, i) => {
+      const by = base + i * lh;
+      doc.text(l, tx, by, { align });
+      if (o.underline) {
+        const lw = doc.getTextWidth(l);
+        const x0 = align === 'center' ? tx - lw / 2 : align === 'right' ? tx - lw : tx;
+        doc.setDrawColor(...cor);
+        doc.setLineWidth(0.12);
+        doc.line(x0, by + 0.45, x0 + lw, by + 0.45);
+      }
+    });
+    return cortado;
+  }
+
+  /** Imagem (dataURL) dentro de um quadro, sem distorcer. false se não deu para desenhar. */
+  function imagemNoQuadro(doc, src, x, y, w, h) {
+    if (!src) return false;
+    try {
+      const props = doc.getImageProperties(src);
+      const escala = Math.min(w / props.width, h / props.height);
+      const iw = props.width * escala;
+      const ih = props.height * escala;
+      doc.addImage(src, props.fileType || 'PNG', x + (w - iw) / 2, y + (h - ih) / 2, iw, ih);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** "STATUS OM" do modelo, com o x na situação que o progresso da tarefa indica. */
+  function statusOm(t) {
+    const preenchido = t && t.progress != null && t.progress !== '';
+    const p = Number(t?.progress);
+    const m = (v) => (v ? ' x' : '   ');
+    return `STATUS OM: CONCLUIDO (${m(preenchido && p >= 100)}) EM ANDAMENTO (${m(preenchido && p > 0 && p < 100)}) NÃO EXECUTADO (${m(preenchido && p === 0)}) `;
+  }
+
+  /** Partes do campo OBSERVAÇÕES: nota do dia, local/turno, ocorrências, equipamentos e paradas. */
+  function partesObservacoes(rdo) {
+    const partes = [];
+    // o turno vai na coluna Equipe dos funcionários; aqui fica só o local
+    if (rdo.location) partes.push(['Local', rdo.location]);
+    if (String(rdo.notes || '').trim()) partes.push(['Observações', String(rdo.notes).trim()]);
+    (rdo.occurrences || []).forEach((o, i) => {
+      const texto = [[o.time, o.type].filter(Boolean).join(' '), o.description, o.location].filter(Boolean).join(' — ');
+      if (texto) partes.push([`Ocorrência ${i + 1}`, texto]);
+    });
+    (rdo.equipmentList || []).forEach((e, i) => {
+      const horas = [e.hoursStart, e.hoursEnd].some((v) => v != null && v !== '')
+        ? `horímetro ${[e.hoursStart, e.hoursEnd].map((v) => (v == null || v === '' ? '?' : `${v}h`)).join(' a ')}` : '';
+      const texto = [e.name, e.code, e.status, horas].filter(Boolean).join(' — ');
+      if (texto) partes.push([`Equipamento ${i + 1}`, texto]);
+    });
+    const paradas = rdo.stoppages || [];
+    paradas.forEach((p, i) => {
+      const dur = Store.fmtHoras(Store.minutosParada(p));
+      const texto = [p.reason, [p.start, p.end].filter(Boolean).join(' a '), dur, p.note].filter(Boolean).join(' — ');
+      if (texto) partes.push([`Parada ${i + 1}`, texto]);
+    });
+    if (paradas.length) partes.push(['Total parado', Store.fmtHoras(paradas.reduce((s, p) => s + (Store.minutosParada(p) || 0), 0))]);
+    return partes;
+  }
+
+  /** Uma folha do RDO ADM na página atual. `k` é a folha (0 = primeira). */
+  function folha(doc, rdo, k, nFolhas, resto) {
+    const c = (a, b, r1, r2, texto, o) => celula(doc, ...area(a, b, r1, r2), texto, o);
+    // texto cortado na folha: guarda o inteiro para a continuação (uma vez só)
+    const guarda = (cortado, campo, texto) => {
+      if (cortado && !resto.some((x) => x[0] === campo)) resto.push([campo, String(texto)]);
+    };
+    const rotulo = { font: 'helvetica', bold: true, size: 7, align: 'center' };
+    const valor = { font: 'times', bold: true, size: 7, align: 'center' };
+    const faixaLaranja = { fill: LARANJA, color: BRANCO, bold: true, align: 'center' };
+
+    // 1: logos e título
+    c('B', 'M', 1, 1, 'RELATÓRIO DIÁRIO DE OBRA', { font: 'helvetica', bold: true, size: 15, align: 'center', borda: false, min: 15 });
+    const logos = window.LogosRdo || {};
+    if (logos.inhaus) imagemNoQuadro(doc, logos.inhaus.src, 11.2, YS[0] + 0.6, 26, ALTURAS[0] - 1.2);
+    if (logos.gps) imagemNoQuadro(doc, logos.gps.src, 182, YS[0] + 1.3, 16.5, ALTURAS[0] - 2.6);
+    // 2: faixas
+    c('B', 'G', 2, 2, 'Dados Contrato', { ...faixaLaranja, font: 'times', size: 7.6 });
+    c('H', 'M', 2, 2, 'Dados da Atividade', { ...faixaLaranja, font: 'times', size: 7.6 });
+    // 3-5: dados do contrato e da atividade
+    c('B', 'C', 3, 3, 'Contrato:', rotulo);
+    c('D', 'D', 3, 3, CONTRATO, rotulo);
+    c('E', 'E', 3, 3, 'Cliente:', valor);
+    guarda(c('F', 'G', 3, 3, rdo.cliente, valor), 'Cliente', rdo.cliente);
+    c('H', 'I', 3, 3, 'DATA', valor);
+    c('J', 'M', 3, 3, rdo.date ? fmtDate(rdo.date) : '', valor);
+    c('B', 'C', 4, 4, 'Complexo', rotulo);
+    guarda(c('D', 'D', 4, 4, rdo.complexo, rotulo), 'Complexo', rdo.complexo);
+    c('E', 'E', 4, 4, 'Gerência:', valor);
+    guarda(c('F', 'G', 4, 4, rdo.gerencia, { ...valor, size: 6.3 }), 'Gerência', rdo.gerencia);
+    c('H', 'I', 4, 4, 'EQUIPE/ COORDENAÇÃO:', { ...valor, size: 6.3 });
+    guarda(c('J', 'M', 4, 4, rdo.equipeCoord, valor), 'Equipe / Coordenação', rdo.equipeCoord);
+    c('B', 'C', 5, 5, 'Objeto:', valor);
+    guarda(c('D', 'M', 5, 5, rdo.objeto, { font: 'times', bold: true, size: 7.6 }), 'Objeto', rdo.objeto);
+
+    // 6-15: registro de execução e horas
+    c('B', 'K', 6, 7, 'Registro de Execução de Atividades', { ...faixaLaranja, font: 'times', size: 11.4 });
+    c('L', 'M', 6, 6, 'REGISTRO DE HORAS', { ...valor, min: 5 });
+    c('L', 'L', 7, 7, 'INÍCIO', { ...valor, size: 6.3 });
+    c('M', 'M', 7, 7, 'FIM', { ...valor, size: 6.3 });
+    Store.ETAPAS.forEach((nome, i) => {
+      const r = 8 + i;
+      const e = rdo.etapas?.[i] || {};
+      const vazio = !e.inicio && !e.fim;
+      c('B', 'B', r, r, String(i + 1), { font: 'times', size: 7, align: 'center' });
+      c('C', 'K', r, r, nome, { font: 'times', size: 7 });
+      c('L', 'L', r, r, vazio ? HORAS_MODELO[i][0] : e.inicio, { font: 'times', size: 7, align: 'right' });
+      c('M', 'M', r, r, vazio ? HORAS_MODELO[i][1] : e.fim, { font: 'times', size: 7, align: 'right' });
+    });
+    c('B', 'M', 16, 16, 'OBSERVAÇÕES/DESVIOS/MOTIVO DA NÃO EXECUÇÃO DA ATIVIDADE:', { ...rotulo, size: 7.6 });
+
+    // 17-40: quatro blocos de OM
+    const tasks = rdo.tasks || [];
+    for (let b = 0; b < OM_POR_FOLHA; b += 1) {
+      const idx = k * OM_POR_FOLHA + b;
+      const t = tasks[idx];
+      const r0 = 17 + b * 6;
+      for (let r = r0; r < r0 + 6; r += 1) c('B', 'M', r, r, '', {});
+      const titulo = t ? [t.os && `OS ${t.os}`, t.area, t.description].filter(Boolean).join(' - ') : '';
+      guarda(c('B', 'M', r0, r0, PREFIXO_OM + titulo, { bold: true, size: 7.6 }), `OM ${idx + 1} — título`, titulo);
+      if (t?.notes) {
+        guarda(c('B', 'M', r0 + 1, r0 + LINHAS_NOTA_OM, t.notes, { bold: true, size: 7.6, valign: 'top', borda: false }),
+          `OM ${idx + 1} — descrição`, t.notes);
+      }
+      c('B', 'M', r0 + 5, r0 + 5, statusOm(t), { size: 7.6, underline: Boolean(t), borda: false });
+    }
+
+    // 41: observações (só na primeira folha; as outras dizem de onde continuam)
+    c('B', 'C', 41, 41, 'OBSERVAÇÕES:', valor);
+    if (k === 0) {
+      const partes = partesObservacoes(rdo);
+      const texto = partes.map(([campo, v]) => (campo === 'Observações' ? v : `${campo}: ${v}`)).join('  |  ');
+      if (c('D', 'M', 41, 41, texto, { size: 7, valign: 'top' })) {
+        partes.forEach(([campo, v]) => guarda(true, campo, v));
+      }
+    } else {
+      c('D', 'M', 41, 41, `Continuação do RDO — folha ${k + 1} de ${nFolhas}. Observações na folha 1.`, { size: 7 });
+    }
+
+    // 42-49: equipe
+    c('B', 'F', 42, 42, 'Funcionário In Haus', { ...faixaLaranja, size: 7.6 });
+    c('G', 'I', 42, 42, 'Função ', { ...faixaLaranja, size: 7.6 });
+    c('J', 'M', 42, 42, 'Equipe', { ...faixaLaranja, size: 7.6 });
+    const equipe = rdo.workforce || [];
+    // coluna Equipe = turno escolhido no preenchimento do RDO (pedido de 09/11/2026);
+    // sem turno, fica a equipe de cada pessoa
+    const turno = String(rdo.shift || '').trim();
+    for (let i = 0; i < PESSOAS_POR_FOLHA; i += 1) {
+      const idx = k * PESSOAS_POR_FOLHA + i;
+      const w = equipe[idx];
+      const r = 43 + i;
+      const nome = w ? `${w.name || ''}${w.status === 'Falta' ? ' (falta)' : ''}` : '';
+      guarda(c('B', 'F', r, r, nome, { font: 'times', size: 6.3, align: 'center' }), `Funcionário ${idx + 1} — nome`, nome);
+      guarda(c('G', 'I', r, r, w?.role, { font: 'times', size: 6.3, align: 'center' }), `Funcionário ${idx + 1} — função`, w?.role);
+      const time = w ? (turno ? `Turno ${turno}` : w.team) : '';
+      guarda(c('J', 'M', r, r, time, { font: 'times', size: 7.6, align: 'center' }), `Funcionário ${idx + 1} — equipe`, time);
+    }
+
+    // 50-53: supervisor, assinatura e responsável do cliente
+    c('B', 'G', 50, 50, 'Supervisor  In Haus', { ...faixaLaranja, size: 7.6 });
+    c('H', 'M', 50, 50, 'Responsável técnico  (Cliente Vale)', { ...faixaLaranja, size: 7.6 });
+    const supervisor = String(rdo.supervisor || '').trim();
+    guarda(c('B', 'G', 51, 51, `Nome:      ${supervisor}`, { bold: true, size: 6.3 }), 'Supervisor', supervisor);
+    c('H', 'M', 51, 51, 'Nome:', { bold: true, size: 6.3 });
+    c('B', 'D', 52, 52, 'Ass:', { bold: true, size: 6.3 });
+    const [ax, ay, aw, ah] = area('B', 'D', 52);
+    imagemNoQuadro(doc, rdo.autor?.assinatura, ax + 8, ay + 0.3, aw - 9, ah - 0.6);
+    c('E', 'G', 52, 52, `Data: ${rdo.date ? fmtDate(rdo.date) : ''}`, { bold: true, size: 6.3 });
+    c('H', 'J', 52, 52, 'Ass:', { bold: true, size: 6.3 });
+    c('K', 'M', 52, 52, 'Data:', { bold: true, size: 6.3 });
+    c('B', 'M', 53, 53, '', { fill: LARANJA });
+    // 54: empresa e CNPJ, fora da borda
+    c('B', 'M', 54, 54, EMPRESA_RODAPE, { bold: true, size: 6.3, borda: false, min: 6.3 });
+
+    // linhas grossas do modelo: contorno e divisões dos blocos
     doc.setDrawColor(0, 0, 0);
-    doc.setLineWidth(0.18);
-    doc.rect(x, y, w, h, 'S');
-    const txt = texto == null ? '' : String(texto);
-    if (!txt.trim()) return;
-    doc.setFont('helvetica', o.bold ? 'bold' : 'normal');
-    doc.setFontSize(size);
-    doc.setTextColor(...(o.color || TINTA));
-    const linhas = doc.splitTextToSize(txt, Math.max(2, w - PAD * 2));
-    const lh = size * 0.3528 * 1.15;
-    const cabem = Math.max(1, Math.floor((h - PAD) / lh));
-    if (linhas.length > cabem) throw new Error('Texto excede a altura da célula do PDF.');
-    const desenhar = linhas;
-    let base;
-    if (o.valign === 'top') base = y + PAD + size * 0.3528 * 0.85;
-    else base = y + h / 2 - ((desenhar.length - 1) * lh) / 2 + size * 0.3528 * 0.35;
-    const tx = o.align === 'center' ? x + w / 2 : o.align === 'right' ? x + w - PAD : x + PAD;
-    doc.text(desenhar, tx, base, { align: o.align || 'left' });
+    doc.setLineWidth(GROSSA);
+    doc.rect(XS[0], YS[0], XS[12] - XS[0], YS[53] - YS[0], 'S');
+    [2, 6, 16, 17, 23, 29, 35, 41, 42, 50, 53].forEach((r) => doc.line(XS[0], YS[r - 1], XS[12], YS[r - 1]));
   }
 
   /**
-   * Desenha um RDO inteiro no formulário do cliente, a partir da página atual
-   * (ou de uma página nova). O PDF de um período chama esta função para cada RDO.
+   * Desenha um RDO inteiro no formulário RDO ADM, a partir da página atual (ou de uma
+   * página nova): uma folha a cada 4 OMs / 7 pessoas, depois a continuação com os textos
+   * que não couberam, o registro fotográfico e a foto de quem preencheu.
+   * O PDF de um período chama esta função para cada RDO.
    */
   async function escrever(doc, rdo, { primeira = true } = {}) {
     // RDO antigo (ou vindo do banco): ganha as etapas e os campos do formulário
     rdo = Store.completo(rdo);
-    const tasks = rdo.tasks || [];
-    const equips = rdo.equipmentList || [];
-    const paradas = rdo.stoppages || [];
-    const ocorrencias = rdo.occurrences || [];
-    const equipe = rdo.workforce || [];
     const fotos = rdo.photos || [];
     const larg = doc.internal.pageSize.getWidth();
     const alt = doc.internal.pageSize.getHeight();
     const margem = 10;
-    const fim = alt - 20; // o rodapé do formulário ocupa os últimos 16 mm
+    const fim = alt - 10; // a linha de controle do rodapé fica nos últimos mm
+    const rotulo = { fill: LARANJA, color: BRANCO, bold: true, size: 8.5, align: 'center' };
 
-    if (!primeira) doc.addPage();
-    let y = 12;
+    const nFolhas = Math.max(1,
+      Math.ceil((rdo.tasks || []).length / OM_POR_FOLHA),
+      Math.ceil((rdo.workforce || []).length / PESSOAS_POR_FOLHA));
+    const resto = [];
+    for (let k = 0; k < nFolhas; k += 1) {
+      if (k > 0 || !primeira) doc.addPage();
+      folha(doc, rdo, k, nFolhas, resto);
+    }
+    let y = fim;
 
-    const rotulo = { fill: LARANJA, color: [255, 255, 255], bold: true, size: 8.5, align: 'center' };
+    // textos que não couberam nas células: inteiros, numa tabela que pagina sozinha
+    if (resto.length) {
+      doc.addPage();
+      y = 12;
+      celula(doc, margem, y, larg - margem * 2, 6.4, `CONTINUAÇÃO — TEXTOS COMPLETOS DO RDO ${rdo.number || ''}`.trim(), rotulo);
+      doc.autoTable({
+        startY: y + 6.4, margin: { top: 12, bottom: 12, left: margem, right: margem },
+        head: [['Campo do RDO', 'Texto completo']], body: resto, theme: 'grid', rowPageBreak: 'auto',
+        styles: { font: 'helvetica', fontSize: 8, cellPadding: PAD, overflow: 'linebreak', textColor: TINTA, lineColor: [0, 0, 0], lineWidth: FINA },
+        headStyles: { fillColor: LARANJA, textColor: BRANCO, fontStyle: 'bold' },
+        columnStyles: { 0: { cellWidth: 42, fontStyle: 'bold' } },
+      });
+      y = doc.lastAutoTable.finalY + 4;
+    }
 
-    // O AutoTable quebra inclusive uma única célula longa entre páginas.
-    // Campos vazios continuam vazios; supervisor é dado, não assinatura.
-    const rows = [];
-    const section = text => rows.push([{ content: text, colSpan: 3, styles: { fillColor: LARANJA, textColor: [0, 0, 0], fontStyle: 'bold' } }]);
-    const row = (key, value) => rows.push([
-      { content: String(key ?? ''), colSpan: 1 },
-      { content: String(value ?? ''), colSpan: 2 },
-    ]);
-    section('RELATÓRIO DIÁRIO DE OBRA');
-    section('Dados Contrato / Dados da Atividade');
-    [['Cliente:', rdo.cliente], ['DATA', fmtDate(rdo.date)],
-      ['Complexo', rdo.complexo], ['Gerência:', rdo.gerencia], ['EQUIPE/ COORDENAÇÃO:', rdo.equipeCoord],
-      ['Objeto:', rdo.objeto], ['Local / Mina / Turno', [rdo.location, rdo.shift].filter(Boolean).join(' — ')],
-      ['Supervisor In Haus:', rdo.supervisor]].forEach(v => row(...v));
-    section('Registro de Execução de Atividades — REGISTRO DE HORAS');
-    Store.ETAPAS.forEach((nome, i) => rows.push([
-      { content: `${i + 1}. ${nome}`, colSpan: 2 },
-      { content: `INÍCIO: ${rdo.etapas[i]?.inicio || ''}\nFIM: ${rdo.etapas[i]?.fim || ''}` },
-    ]));
-    section('OBSERVAÇÕES/DESVIOS/MOTIVO DA NÃO EXECUÇÃO DA ATIVIDADE');
-    row('', rdo.notes);
-    (tasks.length ? tasks : [{}]).forEach(t => {
-      section('Nº OM / TÍTULO / LOCAL / DESCRIÇÃO DETALHADA :');
-      row('OM / Tipo / Local', [t.os, t.maintenanceType, t.area].filter(Boolean).join(' — '));
-      row('Descrição', t.description);
-      const preenchido = t.progress != null && t.progress !== '';
-      const p = Number(t.progress);
-      const marca = v => v ? '( x )' : '(   )';
-      row('STATUS OM', `CONCLUIDO ${marca(preenchido && p >= 100)} EM ANDAMENTO ${marca(preenchido && p > 0 && p < 100)} NÃO EXECUTADO ${marca(preenchido && p === 0)}`);
-    });
-    if (equips.length) section('EQUIPAMENTOS');
-    equips.forEach(e => {
-      row('Equipamento', e.name); row('Código / Status', [e.code, e.status].filter(Boolean).join(' — '));
-      row('Horímetro', [e.hoursStart, e.hoursEnd].map(v => v == null || v === '' ? '' : `${v}h`).join(' a '));
-    });
-    if (paradas.length) section('HORAS PARADAS');
-    paradas.forEach(p => {
-      row('Motivo', p.reason); row('Início / Fim / Duração', [p.start, p.end, Store.fmtHoras(Store.minutosParada(p))].filter(Boolean).join(' — ')); row('Observação', p.note);
-    });
-    if (paradas.length) row('TOTAL PARADO', Store.fmtHoras(paradas.reduce((s, p) => s + (Store.minutosParada(p) || 0), 0)));
-    section('OBSERVAÇÕES:');
-    ocorrencias.forEach(o => row([o.time, o.type].filter(Boolean).join(' — '), [o.description, o.location].filter(Boolean).join(' — ')));
-    if (equipe.length) section('Funcionário In Haus / Função / Equipe');
-    equipe.forEach(w => rows.push([
-      String(`${w.name || ''}${w.status === 'Falta' ? ' (falta)' : ''}`),
-      String(w.role || ''), String(w.team || ''),
-    ]));
-    doc.autoTable({
-      startY: y, margin: { top: 12, bottom: 20, left: margem, right: margem },
-      body: rows, theme: 'grid', rowPageBreak: 'auto',
-      styles: { font: 'helvetica', fontSize: 8, cellPadding: PAD, overflow: 'linebreak', textColor: TINTA, lineColor: [0, 0, 0], lineWidth: 0.18 },
-      columnStyles: { 0: { cellWidth: 65 }, 1: { cellWidth: 90 }, 2: { cellWidth: 35 } },
-    });
-    y = doc.lastAutoTable.finalY;
-
-    // 9. registro fotográfico: as fotos vão junto no PDF, duas por linha, carimbo embaixo
+    // registro fotográfico: as fotos vão junto no PDF, duas por linha
     if (fotos.length) {
       const imagens = await Promise.all(fotos.map((p) => (window.Fotos ? window.Fotos.imagem(p) : (p.data || null))));
       const espaco = 6;
       const colL = (larg - margem * 2 - espaco) / 2;
       const fotoA = 64;
-      const linhaA = fotoA + 15;
-      const novaPagina = () => { doc.addPage(); y = 18; };
-      if (y + 6 + linhaA > fim) novaPagina();
+      const linhaA = fotoA + 8;
+      const novaPagina = () => { doc.addPage(); y = 12; };
+      if (y + 6.4 + linhaA > fim) novaPagina();
       celula(doc, margem, y, larg - margem * 2, 6.4, 'REGISTRO FOTOGRÁFICO', rotulo);
-      y += 6.4;
+      y += 6.4 + 2;
       fotos.forEach((p, i) => {
         const coluna = i % 2;
         if (coluna === 0 && i > 0) y += linhaA;
@@ -215,75 +414,59 @@ window.Pdf = (() => {
         const x = margem + coluna * (colL + espaco);
         doc.setFillColor(...CINZA);
         doc.setDrawColor(0, 0, 0);
-        doc.setLineWidth(0.18);
+        doc.setLineWidth(FINA);
         doc.rect(x, y, colL, fotoA, 'FD');
-        try {
-          const props = doc.getImageProperties(imagens[i]);
-          const escala = Math.min(colL / props.width, fotoA / props.height);
-          const w = props.width * escala;
-          const h = props.height * escala;
-          doc.addImage(imagens[i], props.fileType || 'JPEG', x + (colL - w) / 2, y + (fotoA - h) / 2, w, h);
-        } catch {
+        if (!imagemNoQuadro(doc, imagens[i], x, y, colL, fotoA)) {
           doc.setFont('helvetica', 'normal');
           doc.setFontSize(8);
           doc.setTextColor(120, 120, 120);
           doc.text('Foto indisponível neste aparelho', x + colL / 2, y + fotoA / 2, { align: 'center' });
         }
-        const gps = p.latitude != null && p.longitude != null
-          ? `GPS ${Number(p.latitude).toFixed(6)}, ${Number(p.longitude).toFixed(6)}` : '';
-        const legenda = [ `Foto ${i + 1}`, [p.date && fmtDate(p.date), p.time].filter(Boolean).join(' '), gps, p.desc].filter(Boolean).join(' · ');
-        doc.setFont('helvetica', 'normal');
+        doc.setFont('helvetica', 'bold');
         doc.setFontSize(7.5);
         doc.setTextColor(60, 60, 60);
-        doc.text(doc.splitTextToSize(`Foto ${i + 1}`, colL), x, y + fotoA + 3.5);
+        doc.text(`Foto ${i + 1}`, x, y + fotoA + 3.5);
       });
-      y += linhaA + 3;
-      // Legendas completas em tabela paginada, sem limite de três linhas.
-      doc.autoTable({ startY: Math.min(y, fim), margin: { top: 12, bottom: 20, left: margem, right: margem },
+      y += linhaA + 2;
+      // legendas completas (data, hora, GPS e descrição) em tabela paginada
+      doc.autoTable({
+        startY: Math.min(y, fim - 10), margin: { top: 12, bottom: 12, left: margem, right: margem },
         body: fotos.map((p, i) => [`Foto ${i + 1}`, [p.date && fmtDate(p.date), p.time,
           p.latitude != null && p.longitude != null ? `GPS ${Number(p.latitude).toFixed(6)}, ${Number(p.longitude).toFixed(6)}` : '', p.desc].filter(Boolean).join(' — ')]),
-        theme: 'grid', styles: { fontSize: 8, cellPadding: PAD, overflow: 'linebreak' }, columnStyles: { 0: { cellWidth: 22 } } });
-      y = doc.lastAutoTable.finalY;
+        theme: 'grid', styles: { fontSize: 8, cellPadding: PAD, overflow: 'linebreak', lineColor: [0, 0, 0], lineWidth: FINA },
+        columnStyles: { 0: { cellWidth: 22, fontStyle: 'bold' } },
+      });
+      y = doc.lastAutoTable.finalY + 4;
     }
 
-    // Assinatura do formulário: a foto do rosto do cadastro de quem lançou, congelada no RDO.
+    // quem preencheu: foto do rosto do cadastro, congelada no RDO
     const autor = rdo.autor || null;
-    const caixaL = 30;
-    const caixaA = 26;
-    const blocoA = 6.4 + caixaA + 2;
-    if (y + blocoA > fim) { doc.addPage(); y = 18; }
-    celula(doc, margem, y, larg - margem * 2, 6.4, 'ASSINATURA', rotulo);
-    y += 6.4;
-    doc.setFillColor(...CINZA);
-    doc.setDrawColor(0, 0, 0);
-    doc.setLineWidth(0.18);
-    doc.rect(margem, y, caixaL, caixaA, 'FD');
     if (autor?.foto) {
-      try {
-        const props = doc.getImageProperties(autor.foto);
-        const escala = Math.min(caixaL / props.width, caixaA / props.height);
-        const w = props.width * escala;
-        const h = props.height * escala;
-        doc.addImage(autor.foto, props.fileType || 'JPEG', margem + (caixaL - w) / 2, y + (caixaA - h) / 2, w, h);
-      } catch {
+      const caixaL = 30;
+      const caixaA = 26;
+      if (y + 6.4 + caixaA + 2 > fim) { doc.addPage(); y = 12; }
+      celula(doc, margem, y, larg - margem * 2, 6.4, 'QUEM PREENCHEU O RDO', rotulo);
+      y += 6.4;
+      doc.setFillColor(...CINZA);
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(FINA);
+      doc.rect(margem, y, caixaL, caixaA, 'FD');
+      if (!imagemNoQuadro(doc, autor.foto, margem, y, caixaL, caixaA)) {
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(7.5);
         doc.setTextColor(120, 120, 120);
         doc.text('Foto indisponível', margem + caixaL / 2, y + caixaA / 2, { align: 'center' });
       }
+      const tx = margem + caixaL + 4;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(...TINTA);
+      doc.text(doc.splitTextToSize(String(autor.nome || ''), larg - margem - tx)[0] || '', tx, y + 8);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.text(doc.splitTextToSize(String(autor.funcao || ''), larg - margem - tx)[0] || '', tx, y + 14);
+      imagemNoQuadro(doc, autor.assinatura, tx, y + 16, 50, 9);
     }
-    const txAutor = margem + caixaL + 4;
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
-    doc.setTextColor(...TINTA);
-    doc.text(String(autor?.nome || ''), txAutor, y + 8);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8);
-    doc.text(String(autor?.funcao || ''), txAutor, y + 14);
-    doc.setFontSize(7);
-    doc.setTextColor(90, 90, 90);
-    doc.text('Assinatura de quem preencheu o RDO', txAutor, y + 21);
-    y += caixaA + 2;
   }
 
   /** Monta o PDF de um RDO (com as fotos) e devolve o documento e o nome do arquivo. */
