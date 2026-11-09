@@ -141,10 +141,9 @@ window.Screens = (() => {
           <button class="action-card" data-go="equipment">${icon('truck')}Equipamentos${contagem('equipmentList')}</button>
           <button class="action-card" data-go="tasks">${icon('clipboard')}Tarefas Realizadas${contagem('tasks')}</button>
           <button class="action-card" data-go="occurrences">${icon('alert')}Ocorrências${contagem('occurrences')}</button>
-          <button class="action-card" data-go="stops">${icon('clock')}Horas Paradas${contagem('stoppages')}</button>
           <button class="action-card" data-go="photos">${icon('camera')}Fotos do RDO${contagem('photos')}</button>
-          <button class="action-card" data-go="month">${icon('chart')}Resumo do Mês</button>
-          <button class="action-card wide" data-go="report">${icon('output', 22)}Gerar Relatório</button>
+          ${window.Conta?.ehMestre?.() ? `<button class="action-card" data-go="report">${icon('output')}Gerar Relatório</button>` : ''}
+          ${window.Conta?.ehMestre?.() ? `<button class="action-card" data-go="month">${icon('chart')}Resumo do Mês</button>` : ''}
           ${window.Conta?.ehMestre?.() ? `<button class="action-card wide" data-go="equipe">${icon('users', 20)}RDOs da Equipe</button>` : ''}
           <button class="action-card wide neutro-card" data-go="backup">${icon('shield', 20)}Cópia de Segurança</button>
           <button class="action-card wide neutro-card" data-go="conta">${icon('lock', 20)}Minha Conta</button>
@@ -221,10 +220,6 @@ window.Screens = (() => {
             <input id="h-equipe" type="text" value="${esc(rdo.equipeCoord || '')}" data-key="equipeCoord" placeholder="Ex.: Deivid/Fazendão" autocomplete="off" maxlength="80">
           </div>
           <div class="field full">
-            <label for="h-objeto">Objeto</label>
-            <textarea id="h-objeto" data-key="objeto" placeholder="Objeto do contrato, como no formulário do cliente">${esc(rdo.objeto || '')}</textarea>
-          </div>
-          <div class="field full">
             <label for="h-tipo">Tipo de manutenção</label>
             <select id="h-tipo" data-key="maintenanceType">${opcoes(TIPOS, rdo.maintenanceType)}</select>
           </div>
@@ -282,7 +277,6 @@ window.Screens = (() => {
             d.complexo = ler('complexo').value.trim();
             d.gerencia = ler('gerencia').value.trim();
             d.equipeCoord = ler('equipeCoord').value.trim();
-            d.objeto = ler('objeto').value.trim();
             d.maintenanceType = ler('maintenanceType').value;
             d.location = ler('location').value.trim();
             d.shift = ler('shift').value;
@@ -1004,7 +998,6 @@ window.Screens = (() => {
           <button class="action-card" data-go="equipment">${icon('truck')}Equipamentos</button>
           <button class="action-card" data-go="tasks">${icon('clipboard')}Tarefas Realizadas</button>
           <button class="action-card" data-go="occurrences">${icon('alert')}Ocorrências</button>
-          <button class="action-card" data-go="stops">${icon('clock')}Horas Paradas</button>
           <button class="action-card" data-go="photos">${icon('camera')}Fotos do RDO</button>
         </div>
 
@@ -1289,7 +1282,6 @@ window.Screens = (() => {
           ${caixa(r.total, 'RDOs')}
           ${caixa(`${r.concluidas}/${r.tarefas}`, 'Tarefas concluídas')}
           ${caixa(`${r.horasEquipe}h`, 'Horas de equipe')}
-          ${caixa(Store.fmtHoras(r.minutosParados), 'Horas paradas')}
         </div>
         <div class="info-list">
           <div class="li"><span class="k">Preventiva / Corretiva / Backlog (RDO)</span><span class="v">${r.porTipo.Preventiva} / ${r.porTipo.Corretiva} / ${r.porTipo.Backlog}</span></div>
@@ -1297,7 +1289,6 @@ window.Screens = (() => {
           <div class="li"><span class="k">Backlog ainda aberto</span><span class="v">${r.backlogAberto}</span></div>
           <div class="li"><span class="k">Ocorrências</span><span class="v">${r.ocorrencias}</span></div>
           <div class="li"><span class="k">Finalizados</span><span class="v">${r.finalizados} de ${r.total}</span></div>
-          ${r.motivosParada.map(([motivo, min]) => `<div class="li"><span class="k">Parado: ${esc(motivo)}</span><span class="v">${Store.fmtHoras(min)}</span></div>`).join('')}
         </div>
         <button class="btn primary block" data-act="pdf-mes"${r.total ? '' : ' disabled'}>${icon('download', 18)}<span>PDF do resumo de ${esc(Pdf.nomeMes(mes))}</span></button>
         ${rdos.length ? `<div class="lista-cartoes">${rdos.map((x) => `

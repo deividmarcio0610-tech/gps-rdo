@@ -85,7 +85,7 @@ window.Pdf = (() => {
   const EMPRESA_RODAPE = 'IN-HAUS INDUSTRIAL  SERVIÇOS E LOGISTICA        CNPJ:  05.208.211/0008-04';
   const PREFIXO_OM = 'Nº OM / TÍTULO / LOCAL / DESCRIÇÃO DETALHADA : ';
   // horários da grade do modelo; valem quando a etapa não tem horário no RDO
-  const HORAS_MODELO = [
+  const HORAS_MODELO = window.Store?.HORAS_MODELO || [
     ['07:45', '08:00'], ['08:00', '08:05'], ['08:05', '08:15'], ['08:15', '09:25'],
     ['09:25', '09:27'], ['09:27', '09:30'], ['09:30', '15:30'], ['11:00', '12:00'],
   ];
@@ -260,9 +260,31 @@ window.Pdf = (() => {
     return partes;
   }
 
+  /**
+   * Geometria da folha. O RDO final (com bloqueio) ganha uma linha 9 na tabela de
+   * execução: as 8 linhas de etapa encolhem um pouco e tudo o que vem abaixo fica
+   * exatamente na mesma altura. Sem bloqueio, é a folha antiga, de 54 linhas.
+   */
+  function geometria(comBloqueio) {
+    if (!comBloqueio) return { alturas: ALTURAS, ys: YS, linha: (n) => n };
+    const corte = 4.19 / 8;
+    const alturas = ALTURAS.slice();
+    for (let i = 7; i < 15; i += 1) alturas[i] -= corte;
+    alturas.splice(15, 0, 4.19);
+    const ys = alturas.reduce((a, h) => { a.push(a[a.length - 1] + h); return a; }, [TOPO]);
+    return { alturas, ys, linha: (n) => (n >= 16 ? n + 1 : n) };
+  }
+
   /** Uma folha do RDO ADM na página atual. `k` é a folha (0 = primeira). */
   function folha(doc, rdo, k, nFolhas, resto) {
-    const c = (a, b, r1, r2, texto, o) => celula(doc, ...area(a, b, r1, r2), texto, o);
+    const comBloqueio = Boolean(rdo.bloqueio && (rdo.bloqueio.inicio || rdo.bloqueio.fim));
+    const { alturas, ys, linha } = geometria(comBloqueio);
+    const areaAqui = (a, b, r1, r2 = r1) => {
+      const i = LETRAS.indexOf(a);
+      const j = LETRAS.indexOf(b) + 1;
+      return [XS[i], ys[r1 - 1], XS[j] - XS[i], ys[r2] - ys[r1 - 1]];
+    };
+    const c = (a, b, r1, r2, texto, o) => celula(doc, ...areaAqui(a, b, r1, r2), texto, o);
     // texto cortado na folha: guarda o inteiro para a continuação (uma vez só)
     const guarda = (cortado, campo, texto) => {
       if (cortado && !resto.some((x) => x[0] === campo)) resto.push([campo, String(texto)]);
@@ -292,8 +314,12 @@ window.Pdf = (() => {
     guarda(c('F', 'G', 4, 4, rdo.gerencia, { ...valor, size: 6.3 }), 'Gerência', rdo.gerencia);
     c('H', 'I', 4, 4, 'EQUIPE/ COORDENAÇÃO:', { ...valor, size: 6.3 });
     guarda(c('J', 'M', 4, 4, rdo.equipeCoord, valor), 'Equipe / Coordenação', rdo.equipeCoord);
-    c('B', 'C', 5, 5, 'Objeto:', valor);
-    guarda(c('D', 'M', 5, 5, rdo.objeto, { font: 'times', bold: true, size: 7.6 }), 'Objeto', rdo.objeto);
+    // Campo Objeto saiu do formulário (pedido de 09/11/2026): a linha só é desenhada
+    // quando o RDO ainda tem o texto, para os antigos não perderem o dado.
+    if (String(rdo.objeto || '').trim()) {
+      c('B', 'C', 5, 5, 'Objeto:', valor);
+      guarda(c('D', 'M', 5, 5, rdo.objeto, { font: 'times', bold: true, size: 7.6 }), 'Objeto', rdo.objeto);
+    }
 
     // 6-15: registro de execução e horas
     c('B', 'K', 6, 7, 'Registro de Execução de Atividades', { ...faixaLaranja, font: 'times', size: 11.4 });
@@ -309,14 +335,23 @@ window.Pdf = (() => {
       c('L', 'L', r, r, vazio ? HORAS_MODELO[i][0] : e.inicio, { font: 'times', size: 7, align: 'right' });
       c('M', 'M', r, r, vazio ? HORAS_MODELO[i][1] : e.fim, { font: 'times', size: 7, align: 'right' });
     });
-    c('B', 'M', 16, 16, 'OBSERVAÇÕES/DESVIOS/MOTIVO DA NÃO EXECUÇÃO DA ATIVIDADE:', { ...rotulo, size: 7.6 });
+    // 16 (só no RDO final): o bloqueio do dia ocupa a linha 9 da tabela de execução
+    if (comBloqueio) {
+      const b = rdo.bloqueio;
+      c('B', 'B', 16, 16, '9', { font: 'times', size: 7, align: 'center' });
+      guarda(c('C', 'K', 16, 16, `BLOQUEIO:${b.motivo ? ` ${b.motivo}` : ''}`, { font: 'times', size: 7 }),
+        'Bloqueio', b.motivo);
+      c('L', 'L', 16, 16, b.inicio || '', { font: 'times', size: 7, align: 'right' });
+      c('M', 'M', 16, 16, b.fim || '', { font: 'times', size: 7, align: 'right' });
+    }
+    c('B', 'M', linha(16), linha(16), 'OBSERVAÇÕES/DESVIOS/MOTIVO DA NÃO EXECUÇÃO DA ATIVIDADE:', { ...rotulo, size: 7.6 });
 
     // 17-40: quatro blocos de OM
     const tasks = rdo.tasks || [];
     for (let b = 0; b < OM_POR_FOLHA; b += 1) {
       const idx = k * OM_POR_FOLHA + b;
       const t = tasks[idx];
-      const r0 = 17 + b * 6;
+      const r0 = linha(17) + b * 6;
       for (let r = r0; r < r0 + 6; r += 1) c('B', 'M', r, r, '', {});
       // linha do bloco: OS, TAG do equipamento e área; com OM, as atividades começam na
       // parte de baixo da linha (pedido de 09/11/2026)
@@ -334,21 +369,22 @@ window.Pdf = (() => {
     }
 
     // 41: observações (só na primeira folha; as outras dizem de onde continuam)
-    c('B', 'C', 41, 41, 'OBSERVAÇÕES:', valor);
+    const ROBS = linha(41);
+    c('B', 'C', ROBS, ROBS, 'OBSERVAÇÕES:', valor);
     if (k === 0) {
       const partes = partesObservacoes(rdo);
       const texto = partes.map(([campo, v]) => (campo === 'Observações' ? v : `${campo}: ${v}`)).join('  |  ');
-      if (c('D', 'M', 41, 41, texto, { size: 7, valign: 'top' })) {
+      if (c('D', 'M', ROBS, ROBS, texto, { size: 7, valign: 'top' })) {
         partes.forEach(([campo, v]) => guarda(true, campo, v));
       }
     } else {
-      c('D', 'M', 41, 41, `Continuação do RDO — folha ${k + 1} de ${nFolhas}. Observações na folha 1.`, { size: 7 });
+      c('D', 'M', ROBS, ROBS, `Continuação do RDO — folha ${k + 1} de ${nFolhas}. Observações na folha 1.`, { size: 7 });
     }
 
     // 42-49: equipe
-    c('B', 'F', 42, 42, 'Funcionário In Haus', { ...faixaLaranja, size: 7.6 });
-    c('G', 'I', 42, 42, 'Função ', { ...faixaLaranja, size: 7.6 });
-    c('J', 'M', 42, 42, 'Equipe', { ...faixaLaranja, size: 7.6 });
+    c('B', 'F', linha(42), linha(42), 'Funcionário In Haus', { ...faixaLaranja, size: 7.6 });
+    c('G', 'I', linha(42), linha(42), 'Função ', { ...faixaLaranja, size: 7.6 });
+    c('J', 'M', linha(42), linha(42), 'Equipe', { ...faixaLaranja, size: 7.6 });
     const equipe = rdo.workforce || [];
     // coluna Equipe = turno escolhido no preenchimento do RDO (pedido de 09/11/2026);
     // sem turno, fica a equipe de cada pessoa
@@ -356,7 +392,7 @@ window.Pdf = (() => {
     for (let i = 0; i < PESSOAS_POR_FOLHA; i += 1) {
       const idx = k * PESSOAS_POR_FOLHA + i;
       const w = equipe[idx];
-      const r = 43 + i;
+      const r = linha(43 + i);
       const nome = w ? `${w.name || ''}${w.status === 'Falta' ? ' (falta)' : ''}` : '';
       guarda(c('B', 'F', r, r, nome, { font: 'times', size: 6.3, align: 'center' }), `Funcionário ${idx + 1} — nome`, nome);
       guarda(c('G', 'I', r, r, w?.role, { font: 'times', size: 6.3, align: 'center' }), `Funcionário ${idx + 1} — função`, w?.role);
@@ -365,28 +401,31 @@ window.Pdf = (() => {
     }
 
     // 50-53: supervisor, assinatura e responsável do cliente
-    c('B', 'G', 50, 50, 'Supervisor  In Haus', { ...faixaLaranja, size: 7.6 });
-    c('H', 'M', 50, 50, 'Responsável técnico  (Cliente Vale)', { ...faixaLaranja, size: 7.6 });
+    c('B', 'G', linha(50), linha(50), 'Supervisor  In Haus', { ...faixaLaranja, size: 7.6 });
+    c('H', 'M', linha(50), linha(50), 'Responsável técnico  (Cliente Vale)', { ...faixaLaranja, size: 7.6 });
     // só o modelo: nome digitado nas linhas, sem foto nem assinatura desenhada (pedido de 09/11/2026).
     // O texto encolhe até caber, em vez de vazar da célula.
     const supervisor = String(rdo.supervisor || '').trim();
     const tst = String(rdo.tst || '').trim();
-    guarda(c('B', 'D', 51, 51, `Nome:      ${supervisor}`, { bold: true, size: 6.3, min: 4.6 }), 'Supervisor', supervisor);
-    guarda(c('E', 'G', 51, 51, tst ? `Téc. Segurança: ${tst}` : '', { bold: true, size: 6.3, min: 4.6 }), 'Técnico de Segurança', tst);
-    c('H', 'M', 51, 51, 'Nome:', { bold: true, size: 6.3 });
-    c('B', 'G', 52, 52, 'Ass:', { bold: true, size: 6.3 });
-    c('H', 'M', 52, 52, 'Ass:', { bold: true, size: 6.3 });
-    c('H', 'J', 52, 52, 'Ass:', { bold: true, size: 6.3 });
-    c('K', 'M', 52, 52, 'Data:', { bold: true, size: 6.3 });
-    c('B', 'M', 53, 53, '', { fill: LARANJA });
+    guarda(c('B', 'D', linha(51), linha(51), `Nome:      ${supervisor}`, { bold: true, size: 6.3, min: 4.6 }), 'Supervisor', supervisor);
+    guarda(c('E', 'G', linha(51), linha(51), tst ? `Téc. Segurança: ${tst}` : '', { bold: true, size: 6.3, min: 4.6 }), 'Técnico de Segurança', tst);
+    c('H', 'M', linha(51), linha(51), 'Nome:', { bold: true, size: 6.3 });
+    c('B', 'G', linha(52), linha(52), 'Ass:', { bold: true, size: 6.3 });
+    c('H', 'M', linha(52), linha(52), 'Ass:', { bold: true, size: 6.3 });
+    c('H', 'J', linha(52), linha(52), 'Ass:', { bold: true, size: 6.3 });
+    c('K', 'M', linha(52), linha(52), 'Data:', { bold: true, size: 6.3 });
+    c('B', 'M', linha(53), linha(53), '', { fill: LARANJA });
     // 54: empresa e CNPJ, fora da borda
-    c('B', 'M', 54, 54, EMPRESA_RODAPE, { bold: true, size: 6.3, borda: false, min: 6.3 });
+    c('B', 'M', linha(54), linha(54), EMPRESA_RODAPE, { bold: true, size: 6.3, borda: false, min: 6.3 });
 
     // linhas grossas do modelo: contorno e divisões dos blocos
     doc.setDrawColor(0, 0, 0);
     doc.setLineWidth(GROSSA);
-    doc.rect(XS[0], YS[0], XS[12] - XS[0], YS[53] - YS[0], 'S');
-    [2, 6, 16, 17, 23, 29, 35, 41, 42, 50, 53].forEach((r) => doc.line(XS[0], YS[r - 1], XS[12], YS[r - 1]));
+    doc.rect(XS[0], ys[0], XS[12] - XS[0], ys[alturas.length - 2] - ys[0], 'S');
+    const grossas = [2, 6];
+    if (comBloqueio) grossas.push(16);
+    [16, 17, 23, 29, 35, 41, 42, 50, 53].forEach((r) => grossas.push(linha(r)));
+    grossas.forEach((r) => doc.line(XS[0], ys[r - 1], XS[12], ys[r - 1]));
   }
 
   /**
@@ -558,23 +597,16 @@ window.Pdf = (() => {
       ['Tarefas Preventiva / Corretiva / Backlog', `${r.tarefasPorTipo.Preventiva} / ${r.tarefasPorTipo.Corretiva} / ${r.tarefasPorTipo.Backlog}`],
       ['Backlog ainda aberto (abaixo de 100%)', String(r.backlogAberto)],
       ['Horas de equipe (presentes)', `${r.horasEquipe}h`],
-      ['Horas paradas', window.Store.fmtHoras(r.minutosParados)],
       ['Ocorrências', String(r.ocorrencias)],
       ['Fotos', String(r.fotos)],
     ], { 0: { cellWidth: 110 }, 1: { halign: 'right' } });
 
-    if (r.motivosParada.length) {
-      tabelaResumo('HORAS PARADAS POR MOTIVO', ['Motivo', 'Tempo'],
-        r.motivosParada.map(([motivo, min]) => [motivo, window.Store.fmtHoras(min)]), { 1: { halign: 'right', cellWidth: 30 } });
-    }
-
-    tabelaResumo('RDOs DO MÊS', ['Nº', 'Data', 'Tipo', 'Local / Mina', 'Tarefas', 'Parado', 'Situação'],
+    tabelaResumo('RDOs DO MÊS', ['Nº', 'Data', 'Tipo', 'Local / Mina', 'Tarefas', 'Situação'],
       rdos.map((x) => [
         x.number, fmtDate(x.date), x.maintenanceType || '—', x.location || '—', String(x.tasks.length),
-        window.Store.fmtHoras((x.stoppages || []).reduce((s, p) => s + window.Store.minutosParada(p), 0)),
         x.status === 'final' ? 'Finalizado' : 'Aberto',
       ]),
-      { 0: { cellWidth: 24 }, 1: { cellWidth: 20 }, 2: { cellWidth: 22 }, 4: { halign: 'right', cellWidth: 16 }, 5: { halign: 'right', cellWidth: 16 }, 6: { cellWidth: 20 } });
+      { 0: { cellWidth: 24 }, 1: { cellWidth: 20 }, 2: { cellWidth: 22 }, 4: { halign: 'right', cellWidth: 16 }, 5: { cellWidth: 20 } });
 
     rodape(doc, [window.Store.config.companyName, `Resumo ${nomeMes(mes)}`, `gerado em ${fmtDate(window.Store.todayIso())}`]);
     return { doc, nome: `Resumo_RDO_${mes}.pdf` };

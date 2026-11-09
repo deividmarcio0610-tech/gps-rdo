@@ -26,7 +26,11 @@ window.Mestre = (() => {
   // "Editar antes de gerar": TST e supervisor entram de segunda a sexta e podem sair num dia
   // em que eles não foram. O ajuste é guardado por dia (AAAA-MM-DD), no aparelho; o dia sem
   // ajuste usa o padrão (os dois ligados, supervisor "Tiago"). Vale para o próximo PDF.
-  const AJUSTE_PADRAO = { tst: true, tstNome: '', supervisor: true, nome: 'Tiago' };
+  const AJUSTE_PADRAO = {
+    tst: true, tstNome: '', supervisor: true, nome: 'Tiago',
+    // bloqueio do dia no RDO final: horas paradas, justificativa e o desconto na etapa 7
+    bloqueioInicio: '', bloqueioFim: '', bloqueioMotivo: '',
+  };
   const editar = { dias: {} };
   let painelDia = hoje();
 
@@ -121,8 +125,24 @@ window.Mestre = (() => {
       const ajustados = paraPdfFinal.map((r) => {
         // cada folha usa o ajuste do dia dela (importa no PDF por período)
         const a = ajusteDoDia(r.date);
+        // bloqueio do dia: a linha 9 do PDF, o desconto no fim da execução e a observação
+        const parado = Store.minutosParada({ start: a.bloqueioInicio, end: a.bloqueioFim });
+        const etapas = (Array.isArray(r.etapas) ? r.etapas : []).map((e) => ({ ...e }));
+        if (parado > 0) {
+          const inicio = etapas[6]?.inicio || Store.HORAS_MODELO[6][0];
+          const fim = etapas[6]?.fim || Store.HORAS_MODELO[6][1];
+          const iniMin = Store.minutosDe(inicio) ?? 0;
+          etapas[6] = { inicio, fim: Store.hhmmDe(Math.max(iniMin, (Store.minutosDe(fim) ?? iniMin) - parado)) };
+        }
+        const textoBloqueio = parado > 0
+          ? `Parado por espera no bloqueio das ${a.bloqueioInicio} às ${a.bloqueioFim} (${Store.fmtHoras(parado)})${a.bloqueioMotivo ? ` — ${a.bloqueioMotivo}` : ''}.`
+          : '';
+        const notes = [String(r.notes || '').trim(), textoBloqueio].filter(Boolean).join('\n');
         return {
           ...r,
+          etapas,
+          notes,
+          bloqueio: parado > 0 ? { inicio: a.bloqueioInicio, fim: a.bloqueioFim, motivo: a.bloqueioMotivo } : null,
           semTstPadrao: !a.tst,
           semSupervisorPadrao: !a.supervisor,
           supervisor: a.supervisor ? (String(r.supervisor || '').trim() || a.nome) : '',
@@ -214,7 +234,13 @@ window.Mestre = (() => {
           </label>
           <div class="field"><label for="e-supervisor">Nome do supervisor</label>
             <input id="e-supervisor" type="text" value="${esc(ajusteDoDia(painelDia).nome)}"${ajusteDoDia(painelDia).supervisor ? '' : ' disabled'}></div>
-          <p class="dica">Escolha o dia e deixe marcado só o que teve naquele dia. O ajuste fica guardado por dia.</p>
+          <div class="field"><label for="e-bloqueio-ini">Bloqueio: início</label>
+            <input id="e-bloqueio-ini" type="time" value="${esc(ajusteDoDia(painelDia).bloqueioInicio)}"></div>
+          <div class="field"><label for="e-bloqueio-fim">Bloqueio: fim</label>
+            <input id="e-bloqueio-fim" type="time" value="${esc(ajusteDoDia(painelDia).bloqueioFim)}"></div>
+          <div class="field"><label for="e-bloqueio-motivo">Justificativa do bloqueio</label>
+            <input id="e-bloqueio-motivo" type="text" value="${esc(ajusteDoDia(painelDia).bloqueioMotivo)}" placeholder="Ex.: aguardando liberação da área"></div>
+          <p class="dica">Escolha o dia e deixe marcado só o que teve naquele dia. O ajuste fica guardado por dia. Com o bloqueio preenchido, as horas saem do fim da etapa 7 e a frase entra na observação.</p>
         </div></div>
 
         <button class="btn primary block" data-act="gerar"${cache.lista.length && !gerando ? '' : ' disabled'}>
@@ -282,6 +308,21 @@ window.Mestre = (() => {
         });
         root.querySelector('#e-supervisor')?.addEventListener('change', (e) => {
           guardarAjuste(painelDia, { nome: String(e.target.value || '').trim() || 'Tiago' });
+          pronto = null;
+          app.render();
+        });
+        root.querySelector('#e-bloqueio-ini')?.addEventListener('change', (e) => {
+          guardarAjuste(painelDia, { bloqueioInicio: String(e.target.value || '') });
+          pronto = null;
+          app.render();
+        });
+        root.querySelector('#e-bloqueio-fim')?.addEventListener('change', (e) => {
+          guardarAjuste(painelDia, { bloqueioFim: String(e.target.value || '') });
+          pronto = null;
+          app.render();
+        });
+        root.querySelector('#e-bloqueio-motivo')?.addEventListener('change', (e) => {
+          guardarAjuste(painelDia, { bloqueioMotivo: String(e.target.value || '').trim() });
           pronto = null;
           app.render();
         });

@@ -22,6 +22,14 @@ window.Store = (() => {
     'INICIO DE EXECUÇÃO DA ATIVIDADE:',
     'HORÁRIO DE ALMOÇO/JANTA',
   ];
+  /*
+   * Horários padrão da grade do modelo "RDO ADM". O formulário do funcionário continua
+   * em branco (modelo antigo); o PDF final usa estes valores quando a etapa não tem hora.
+   */
+  const HORAS_MODELO = [
+    ['07:45', '08:00'], ['08:00', '08:05'], ['08:05', '08:15'], ['08:15', '09:25'],
+    ['09:25', '09:27'], ['09:27', '09:30'], ['09:30', '15:30'], ['11:00', '12:00'],
+  ];
   const etapasVazias = () => ETAPAS.map(() => ({ inicio: '', fim: '' }));
 
   /*
@@ -79,6 +87,16 @@ window.Store = (() => {
     const x = { stoppages: [], ...r };
     const guardadas = Array.isArray(x.etapas) ? x.etapas : [];
     x.etapas = ETAPAS.map((_, i) => ({ inicio: '', fim: '', ...(guardadas[i] || {}) }));
+    // bloqueio do dia: { inicio, fim, motivo }; baseFim/fimAjustado guardam o desconto
+    x.bloqueio = x.bloqueio && typeof x.bloqueio === 'object'
+      ? {
+        inicio: String(x.bloqueio.inicio || ''),
+        fim: String(x.bloqueio.fim || ''),
+        motivo: String(x.bloqueio.motivo || ''),
+        baseFim: String(x.bloqueio.baseFim || ''),
+        fimAjustado: String(x.bloqueio.fimAjustado || ''),
+      }
+      : null;
     for (const k of ['cliente', 'complexo', 'gerencia', 'equipeCoord', 'objeto', 'contractName', 'location', 'maintenanceType', 'shift', 'weather', 'startTime', 'endTime', 'supervisor', 'tst', 'notes']) {
       if (typeof x[k] !== 'string') x[k] = '';
     }
@@ -166,6 +184,7 @@ window.Store = (() => {
       equipeCoord: '',  // EQUIPE / COORDENAÇÃO
       objeto: '',
       etapas: etapasVazias(),  // horas de início e fim de cada etapa do dia
+      bloqueio: null,  // { inicio, fim, motivo, baseFim, fimAjustado }
       location: '',  // local / mina digitado à mão no cabeçalho
       maintenanceType: '',  // Preventiva, Corretiva ou Backlog (escolhido no cabeçalho)
       shift: '',
@@ -186,16 +205,24 @@ window.Store = (() => {
     };
   }
 
+  /** HH:MM → minutos do dia (null quando não é hora). */
+  function minutosDe(hhmm) {
+    const [h, m] = String(hhmm || '').split(':').map(Number);
+    return Number.isInteger(h) && Number.isInteger(m) ? h * 60 + m : null;
+  }
+
   /** Minutos de uma parada (HH:MM → HH:MM); passa da meia-noite se o fim for menor. */
   function minutosParada(p) {
-    const min = (hhmm) => {
-      const [h, m] = String(hhmm || '').split(':').map(Number);
-      return Number.isInteger(h) && Number.isInteger(m) ? h * 60 + m : null;
-    };
-    const ini = min(p?.start);
-    const fim = min(p?.end);
+    const ini = minutosDe(p?.start);
+    const fim = minutosDe(p?.end);
     if (ini == null || fim == null) return 0;
     return fim >= ini ? fim - ini : fim + 1440 - ini;
+  }
+
+  /** Minutos do dia → HH:MM; dá a volta no dia em vez de passar de 23:59. */
+  function hhmmDe(minutos) {
+    const n = ((Math.round(Number(minutos) || 0) % 1440) + 1440) % 1440;
+    return `${String(Math.floor(n / 60)).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}`;
   }
 
   /** 90 → "1h30", 45 → "0h45". */
@@ -211,9 +238,12 @@ window.Store = (() => {
 
     uid,
     ETAPAS,
+    HORAS_MODELO,
     completo,
     todayIso,
+    minutosDe,
     minutosParada,
+    hhmmDe,
     fmtHoras,
     nextNumber,
     emptyRdo,
