@@ -23,6 +23,7 @@ window.Screens = (() => {
     month: 'Resumo do Mês',
     conta: 'Minha Conta',
     equipe: 'RDOs da Equipe',
+    controle: 'Controle de RDO',
   };
 
   // -------------------------------------------------------------- filtro dos RDOs
@@ -142,8 +143,9 @@ window.Screens = (() => {
           <button class="action-card" data-go="tasks">${icon('clipboard')}Tarefas Realizadas${contagem('tasks')}</button>
           <button class="action-card" data-go="occurrences">${icon('alert')}Ocorrências${contagem('occurrences')}</button>
           <button class="action-card" data-go="photos">${icon('camera')}Fotos do RDO${contagem('photos')}</button>
-          ${window.Conta?.ehMestre?.() ? `<button class="action-card" data-go="report">${icon('output')}Gerar Relatório</button>` : ''}
+          ${window.Conta?.ehMestre?.() ? `<button class="action-card" data-act="relatorio-aba">${icon('output')}Gerar Relatório</button>` : ''}
           ${window.Conta?.ehMestre?.() ? `<button class="action-card" data-go="month">${icon('chart')}Resumo do Mês</button>` : ''}
+          ${window.Conta?.ehMestre?.() ? `<button class="action-card" data-act="controle-aba">${icon('clipboard')}Controle de RDO</button>` : ''}
           ${window.Conta?.ehMestre?.() ? `<button class="action-card wide" data-go="equipe">${icon('users', 20)}RDOs da Equipe</button>` : ''}
           <button class="action-card wide neutro-card" data-go="backup">${icon('shield', 20)}Cópia de Segurança</button>
           <button class="action-card wide neutro-card" data-go="conta">${icon('lock', 20)}Minha Conta</button>
@@ -161,6 +163,28 @@ window.Screens = (() => {
       bind(root) {
         root.querySelectorAll('[data-go]').forEach((b) => {
           b.addEventListener('click', () => app.go(b.dataset.go));
+        });
+        // pedido de 09/11/2026: Gerar Relatório abre numa aba nova do navegador, com o RDO aberto.
+        // No APK não há abas (window.open iria para o navegador do sistema): abre a tela no app.
+        root.querySelector('[data-act="relatorio-aba"]')?.addEventListener('click', () => {
+          if (window.Capacitor?.isNativePlatform?.()) { app.go('report'); return; }
+          const url = new URL('index.html', location.href);
+          url.searchParams.set('abrir', 'report');
+          if (rdo?.id) url.searchParams.set('rdo', rdo.id);
+          // sem 'noopener' na chamada: com ele o window.open devolve null e não dá para saber se abriu
+          const aba = window.open(url.href, '_blank');
+          // aba bloqueada pelo navegador: segue na mesma tela, como antes
+          if (!aba) { app.go('report'); return; }
+          try { aba.opener = null; } catch { /* nada a fazer */ }
+        });
+        // pedido de 09/11/2026: Controle de RDO (quem fez e quem não fez) também abre em aba nova
+        root.querySelector('[data-act="controle-aba"]')?.addEventListener('click', () => {
+          if (window.Capacitor?.isNativePlatform?.()) { app.go('controle'); return; }
+          const url = new URL('index.html', location.href);
+          url.searchParams.set('abrir', 'controle');
+          const aba = window.open(url.href, '_blank');
+          if (!aba) { app.go('controle'); return; }
+          try { aba.opener = null; } catch { /* nada a fazer */ }
         });
         root.querySelector('[data-act="novo"]')?.addEventListener('click', () => {
           const novo = Store.createRdo();
@@ -1437,7 +1461,9 @@ window.Screens = (() => {
   // tela da conta principal; quem não é a conta principal volta ao início
   const equipe = (rdo) => (window.Mestre && window.Conta?.ehMestre?.() ? window.Mestre.tela(app) : home(rdo));
 
-  const mapa = { home, header, etapas, workforce, equipment, tasks, occurrences, stops, photos, report, reports, backup, month, roster, conta, equipe };
+  const controle = (rdo) => (window.Mestre && window.Conta?.ehMestre?.() ? window.Mestre.controle(app) : home(rdo));
+
+  const mapa = { home, header, etapas, workforce, equipment, tasks, occurrences, stops, photos, report, reports, backup, month, roster, conta, equipe, controle };
 
   return {
     boot(appRef) { app = appRef; },

@@ -302,6 +302,38 @@ window.Nuvem = (() => {
     return listaDe(snap).sort((a, b) => String(a.json.number).localeCompare(String(b.json.number)));
   }
 
+  /** Espera o banco devolver a sessão guardada: numa aba nova a consulta sairia sem login. */
+  async function sessaoPronta() {
+    await iniciar();
+    if (auth.currentUser) return auth.currentUser;
+    return new Promise((resolver) => {
+      let parar = null;
+      parar = auth.onAuthStateChanged((u) => { resolver(u); setTimeout(() => parar?.(), 0); });
+    });
+  }
+
+  /**
+   * Contas cadastradas, para o controle de quem fez o RDO do dia. Só a conta principal
+   * consegue listar (regra de /usuarios); os demais recebem "permission-denied".
+   */
+  async function usuarios() {
+    await iniciar();
+    const snap = await db.collection('usuarios').get().catch((e) => { throw falha(e); });
+    return snap.docs.map((d) => {
+      const x = d.data() || {};
+      const email = String(x.email || '').toLowerCase();
+      return {
+        id: d.id,
+        nome: String(x.nome || '').trim() || email || 'sem nome',
+        email,
+        funcao: String(x.funcao || '').trim(),
+        // o documento do supervisor pode ter nascido com mestre=false (e-mail ainda não confirmado)
+        mestre: x.mestre === true || email === MESTRE,
+        criado: Number(x.criado) || 0,
+      };
+    });
+  }
+
   /** Imagens de um RDO do banco, na ordem original. */
   async function fotosDe(docId) {
     await iniciar();
@@ -325,7 +357,7 @@ window.Nuvem = (() => {
   return {
     configurado, emulador: EMULADOR, iniciar, aoMudar, atual,
     perfil, cadastrar, entrar, sair, esqueci, trocarSenha, salvarPerfil, mestre,
-    publicar, publicarComo, meusRdos, todos, fotosDe, apagar, idDoc,
+    publicar, publicarComo, meusRdos, todos, usuarios, sessaoPronta, fotosDe, apagar, idDoc,
     MESTRE,
   };
 })();

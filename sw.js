@@ -3,7 +3,7 @@
  * Estratégia — rede primeiro para o HTML (pega versão nova quando há internet),
  * cache primeiro para os demais arquivos, que só mudam junto com uma versão.
  */
-const VERSAO = 'gps-rdo-v24';
+const VERSAO = 'gps-rdo-v26';
 const ESSENCIAIS = [
   './',
   'index.html',

@@ -399,5 +399,124 @@ window.Mestre = (() => {
     };
   }
 
-  return { tela };
+  // ------------------------------------------------------------ controle do dia
+  // Pedido de 09/11/2026: quem fez o RDO no dia escolhido (verde) e quem não fez (vermelho).
+  // Abre numa aba própria, como o Gerar Relatório. A lista vem das contas cadastradas.
+  const diaDaUrl = new URLSearchParams(location.search).get('dia');
+  let diaCtl = /^\d{4}-\d{2}-\d{2}$/.test(String(diaDaUrl || '')) ? diaDaUrl : hoje();
+  let ctl = { chave: '', usuarios: [], rdos: [] };
+  let carregandoCtl = false;
+  let erroCtl = '';
+
+  async function carregarControle(app) {
+    const chave = diaCtl;
+    if (ctl.chave === chave || carregandoCtl) return;
+    carregandoCtl = true;
+    erroCtl = '';
+    try {
+      // aba nova: a sessão guardada demora um instante para voltar do banco
+      await Nuvem.sessaoPronta();
+      const [usuarios, rdos] = await Promise.all([Nuvem.usuarios(), Nuvem.todos(chave, chave)]);
+      ctl = { chave, usuarios, rdos };
+    } catch (e) {
+      erroCtl = e.message;
+      ctl = { chave, usuarios: [], rdos: [] };
+    }
+    carregandoCtl = false;
+    app?.render?.();
+  }
+
+  /** Cada conta (sem a do supervisor) com os RDOs dela no dia; quem mandou e saiu da lista também aparece. */
+  function situacao() {
+    const porDono = new Map();
+    ctl.rdos.forEach((r) => {
+      if (!porDono.has(r.dono)) porDono.set(r.dono, []);
+      porDono.get(r.dono).push(r);
+    });
+    const pessoas = ctl.usuarios.filter((u) => !u.mestre).map((u) => ({ ...u, rdos: porDono.get(u.id) || [] }));
+    const conhecidos = new Set(ctl.usuarios.map((u) => u.id));
+    porDono.forEach((rdos, dono) => {
+      if (conhecidos.has(dono)) return;
+      pessoas.push({ id: dono, nome: rdos[0].nome || rdos[0].email || 'sem nome', email: rdos[0].email || '', funcao: '', rdos });
+    });
+    const porNome = (a, b) => a.nome.localeCompare(b.nome, 'pt-BR');
+    return {
+      fez: pessoas.filter((p) => p.rdos.length).sort(porNome),
+      naoFez: pessoas.filter((p) => !p.rdos.length).sort(porNome),
+    };
+  }
+
+  function pessoaHtml(p, fez) {
+    const sub = [p.funcao, p.email].filter(Boolean).map(esc).join(' · ');
+    const rdos = p.rdos.map((r) => `
+      <button class="btn ghost" data-abrir-ctl="${esc(r.docId)}" style="padding:4px 10px;font-size:12px">
+        RDO ${esc(r.json.number)}${r.json.status === 'final' ? ' · finalizado' : ''}</button>`).join('');
+    return `
+      <div class="card ctl-pessoa" data-situacao="${fez ? 'fez' : 'nao-fez'}"
+        style="border-left:5px solid var(${fez ? '--green' : '--red'});background:var(${fez ? '--green-soft' : '--red-soft'})">
+        <div class="body">
+          <div class="name" style="display:flex;justify-content:space-between;gap:8px;align-items:center">
+            <span>${esc(p.nome)}</span>
+            <span class="badge ${fez ? 'green' : 'red'}">${fez ? 'Fez' : 'Não fez'}</span>
+          </div>
+          ${sub ? `<div class="sub">${sub}</div>` : ''}
+          ${rdos ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">${rdos}</div>` : ''}
+        </div>
+      </div>`;
+  }
+
+  function controle(app) {
+    carregarControle(app);
+    let corpo;
+    if (carregandoCtl || ctl.chave !== diaCtl) corpo = '<div class="empty">Buscando as contas e os RDOs no banco...</div>';
+    else if (erroCtl) corpo = `<div class="aviso erro">${esc(erroCtl)}</div>`;
+    else {
+      const { fez, naoFez } = situacao();
+      corpo = !fez.length && !naoFez.length
+        ? '<div class="empty">Nenhuma conta de funcionário cadastrada.</div>'
+        : `
+          <div style="display:flex;gap:8px">
+            <span class="badge green" id="ctl-fez">${fez.length} fizeram</span>
+            <span class="badge red" id="ctl-nao-fez">${naoFez.length} não fizeram</span>
+          </div>
+          <div class="section-label">Não fizeram · ${naoFez.length}</div>
+          <div class="lista-cartoes">${naoFez.map((p) => pessoaHtml(p, false)).join('') || '<div class="empty">Todos fizeram.</div>'}</div>
+          <div class="section-label">Fizeram · ${fez.length}</div>
+          <div class="lista-cartoes">${fez.map((p) => pessoaHtml(p, true)).join('') || '<div class="empty">Ninguém mandou RDO neste dia.</div>'}</div>`;
+    }
+    return {
+      titulo: 'Controle de RDO',
+      html: `
+        <div class="field"><label for="ctl-dia">Dia</label>
+          <input id="ctl-dia" type="date" value="${esc(diaCtl)}"></div>
+        <button class="btn ghost" data-act="ctl-atualizar" style="font-size:12.5px">Atualizar</button>
+        <div class="section-label">${fmtDate(diaCtl)}</div>
+        ${corpo}
+        <p class="dica">Verde: a pessoa tem RDO com a data escolhida no banco. Vermelho: não tem. RDO feito sem internet só conta depois que subir.</p>`,
+      bind(root) {
+        root.querySelector('#ctl-dia')?.addEventListener('change', (e) => {
+          if (!e.target.value) return;
+          diaCtl = e.target.value;
+          app.render();
+        });
+        root.querySelector('[data-act="ctl-atualizar"]')?.addEventListener('click', () => {
+          ctl = { chave: '', usuarios: [], rdos: [] };
+          app.render();
+        });
+        root.querySelectorAll('[data-abrir-ctl]').forEach((b) => b.addEventListener('click', async () => {
+          const item = ctl.rdos.find((x) => x.docId === b.dataset.abrirCtl);
+          if (!item) return;
+          b.disabled = true;
+          try {
+            const id = await Conta.abrirDoBanco(item);
+            if (id) app.abrir(id);
+            else toast('Não foi possível abrir este RDO.');
+          } catch (e) { toast(e.message); }
+          b.disabled = false;
+        }));
+      },
+    };
+  }
+
+  return { tela, controle };
 })();
