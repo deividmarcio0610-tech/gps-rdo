@@ -200,6 +200,31 @@ window.Pdf = (() => {
     }
   }
 
+  /** Segunda a sexta, contando pelo dia do RDO (data local, sem fuso). */
+  function diaUtil(iso) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+    if (!m) return false;
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getDay();
+    return d >= 1 && d <= 5;
+  }
+
+  /**
+   * Padrões de segunda a sexta (pedido de 09/11/2026): o técnico de segurança aparece na
+   * equipe e o supervisor vem preenchido com Tiago. O aparelho que gera o PDF pode desligar
+   * cada um (`semTstPadrao` / `semSupervisorPadrao`), para os dias em que eles não foram.
+   */
+  const TST_PADRAO = { name: '', role: 'Técnico de Segurança', equipe: '' };
+  function comPadroesDoDia(rdo) {
+    const x = { ...rdo };
+    if (!diaUtil(x.date)) return x;
+    if (!x.semSupervisorPadrao && !String(x.supervisor || '').trim()) x.supervisor = 'Tiago';
+    const equipe = Array.isArray(x.workforce) ? x.workforce.slice() : [];
+    const temTst = equipe.some((w) => /seguran/i.test(String(w?.role || '')));
+    if (!x.semTstPadrao && !temTst) equipe.push({ ...TST_PADRAO });
+    x.workforce = equipe;
+    return x;
+  }
+
   /** "STATUS OM" do modelo, com o x na situação que o progresso da tarefa indica. */
   function statusOm(t) {
     const preenchido = t && t.progress != null && t.progress !== '';
@@ -292,11 +317,17 @@ window.Pdf = (() => {
       const t = tasks[idx];
       const r0 = 17 + b * 6;
       for (let r = r0; r < r0 + 6; r += 1) c('B', 'M', r, r, '', {});
-      const titulo = t ? [t.os && `OS ${t.os}`, t.area, t.description].filter(Boolean).join(' - ') : '';
+      // linha do bloco: OS, TAG do equipamento e área; com OM, as atividades começam na
+      // parte de baixo da linha (pedido de 09/11/2026)
+      const comOm = Boolean(t && (String(t.os || '').trim() || String(t.tag || '').trim()));
+      // "Nº da OS" digitado como "OS-4472" não vira "OS OS-4472"
+      const numeroOs = String(t?.os || '').trim().replace(/^(os|om)\s*[-–:]?\s*/i, '');
+      const titulo = t ? [numeroOs && `OS ${numeroOs}`, t.tag && `TAG ${t.tag}`, t.area, comOm ? '' : t.description].filter(Boolean).join(' - ') : '';
       guarda(c('B', 'M', r0, r0, PREFIXO_OM + titulo, { bold: true, size: 7.6 }), `OM ${idx + 1} — título`, titulo);
-      if (t?.notes) {
-        guarda(c('B', 'M', r0 + 1, r0 + LINHAS_NOTA_OM, t.notes, { bold: true, size: 7.6, valign: 'top', borda: false }),
-          `OM ${idx + 1} — descrição`, t.notes);
+      const atividades = t ? [comOm ? t.description : '', t.notes].filter(Boolean).join(' — ') : '';
+      if (atividades) {
+        guarda(c('B', 'M', r0 + 1, r0 + LINHAS_NOTA_OM, atividades, { bold: true, size: 7.6, valign: 'bottom', borda: false }),
+          `OM ${idx + 1} — atividades`, atividades);
       }
       c('B', 'M', r0 + 5, r0 + 5, statusOm(t), { size: 7.6, underline: Boolean(t), borda: false });
     }
@@ -363,7 +394,7 @@ window.Pdf = (() => {
    */
   async function escrever(doc, rdo, { primeira = true } = {}) {
     // RDO antigo (ou vindo do banco): ganha as etapas e os campos do formulário
-    rdo = Store.completo(rdo);
+    rdo = comPadroesDoDia(Store.completo(rdo));
     const fotos = rdo.photos || [];
     const larg = doc.internal.pageSize.getWidth();
     const alt = doc.internal.pageSize.getHeight();

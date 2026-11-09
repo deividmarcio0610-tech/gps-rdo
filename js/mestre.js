@@ -23,6 +23,9 @@ window.Mestre = (() => {
   let pronto = null;                // { nome, blob, quantos }
   let gerando = false;
   let avisoGerar = '';
+  // "Editar antes de gerar": TST e supervisor entram de segunda a sexta e podem sair num dia
+  // em que eles não foram. Vale só para o próximo PDF e fica neste aparelho.
+  let editar = { tst: true, supervisor: true, nome: 'Tiago' };
 
   const intervalo = () => (modo === 'dia' ? { de: dia, ate: dia } : { de, ate });
   const chaveDe = () => {
@@ -56,6 +59,39 @@ window.Mestre = (() => {
     return rdo;
   }
 
+  /**
+   * Dia com mais de um RDO vira um relatório só: as atividades de todos na ordem do número,
+   * a equipe de todos (sem repetir pessoa) e o turno de cada um na coluna Equipe.
+   */
+  function juntarDoDia(rdos, data) {
+    const lista = rdos.slice().sort((a, b) => String(a.number).localeCompare(String(b.number), 'pt-BR', { numeric: true }));
+    const base = { ...lista[0] };
+    const turnos = [...new Set(lista.map((r) => String(r.shift || '').trim()).filter(Boolean))];
+    const pessoas = [];
+    const vistos = new Set();
+    lista.forEach((r) => (r.workforce || []).forEach((w) => {
+      const chave = `${String(w?.name || '').trim().toLowerCase()}|${String(w?.role || '').trim().toLowerCase()}`;
+      if (vistos.has(chave)) return;
+      vistos.add(chave);
+      pessoas.push(w);
+    }));
+    const tudo = (campo) => lista.flatMap((r) => (Array.isArray(r[campo]) ? r[campo] : []));
+    const notas = lista.map((r) => String(r.notes || '').trim()).filter(Boolean);
+    return {
+      ...base,
+      date: data || base.date,
+      shift: turnos.join(' / '),
+      workforce: pessoas,
+      tasks: tudo('tasks'),
+      occurrences: tudo('occurrences'),
+      equipmentList: tudo('equipmentList'),
+      stoppages: tudo('stoppages'),
+      photos: tudo('photos'),
+      notes: notas.join('  |  '),
+      number: lista.map((r) => r.number).filter(Boolean).join('+'),
+    };
+  }
+
   async function gerar(app) {
     if (gerando) return;
     const lista = cache.lista.slice();
@@ -74,7 +110,15 @@ window.Mestre = (() => {
       app?.render?.();
       const nome = modo === 'dia' ? `RDO_${dia}.pdf` : `RDO_${de}_a_${ate}.pdf`;
       const titulo = modo === 'dia' ? `RDO ${fmtDate(dia)}` : `RDOs de ${fmtDate(de)} a ${fmtDate(ate)}`;
-      const { doc } = await Pdf.montarVarios(rdos, { nome, titulo });
+      // dia com vários RDOs não repete folha: junta as atividades e a equipe num só relatório
+      const paraPdfFinal = modo === 'dia' && rdos.length > 1 ? [juntarDoDia(rdos, dia)] : rdos;
+      const ajustados = paraPdfFinal.map((r) => ({
+        ...r,
+        semTstPadrao: !editar.tst,
+        semSupervisorPadrao: !editar.supervisor,
+        supervisor: editar.supervisor ? (String(r.supervisor || '').trim() || editar.nome) : String(r.supervisor || '').trim(),
+      }));
+      const { doc } = await Pdf.montarVarios(ajustados, { nome, titulo });
       pronto = { nome, blob: doc.output('blob'), quantos: rdos.length };
       toast(`PDF pronto: ${rdos.length} RDO(s).`);
     } catch (e) {
@@ -145,10 +189,23 @@ window.Mestre = (() => {
         <div class="section-label">RDOs no banco${cache.lista.length ? ` · ${cache.lista.length}` : ''}</div>
         <div id="lista-equipe">${listaHtml()}</div>
 
+        <div class="card"><div class="body" style="display:grid;gap:8px">
+          <div class="name">${icon('text', 16)} Editar antes de gerar</div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px">
+            <input type="checkbox" data-op="tst"${editar.tst ? ' checked' : ''}> Técnico de Segurança (seg a sex)
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px">
+            <input type="checkbox" data-op="supervisor"${editar.supervisor ? ' checked' : ''}> Supervisor (seg a sex)
+          </label>
+          <div class="field"><label for="e-supervisor">Nome do supervisor</label>
+            <input id="e-supervisor" type="text" value="${esc(editar.nome)}"${editar.supervisor ? '' : ' disabled'}></div>
+          <p class="dica">Desligue o TST ou o supervisor no dia em que eles não foram.</p>
+        </div></div>
+
         <button class="btn primary block" data-act="gerar"${cache.lista.length && !gerando ? '' : ' disabled'}>
           ${icon('output', 18)}<span>${gerando ? 'Preparando...' : 'Gerar RDO'}</span></button>
         ${gerando ? `<p class="dica">${esc(avisoGerar || 'Preparando o arquivo...')}</p>` : ''}
-        <p class="dica">Um RDO por página, no formato do relatório. Por período, todos vão num PDF só.</p>
+        <p class="dica">Dia com mais de um RDO vira um relatório só, com as atividades e o turno de cada um.</p>
         ${prontoHtml()}`,
       bind(root) {
         root.querySelectorAll('[data-modo]').forEach((b) => b.addEventListener('click', () => {
@@ -188,6 +245,17 @@ window.Mestre = (() => {
           } catch (e) { toast(e.message); }
           b.disabled = false;
         }));
+
+        root.querySelectorAll('[data-op]').forEach((b) => b.addEventListener('change', () => {
+          editar[b.dataset.op] = b.checked;
+          pronto = null;
+          app.render();
+        }));
+        root.querySelector('#e-supervisor')?.addEventListener('change', (e) => {
+          editar.nome = String(e.target.value || '').trim() || 'Tiago';
+          pronto = null;
+          app.render();
+        });
 
         root.querySelector('[data-act="gerar"]')?.addEventListener('click', () => gerar(app));
 

@@ -615,6 +615,7 @@ window.Screens = (() => {
       { key: 'description', label: 'Descrição', type: 'textarea', placeholder: 'O que foi executado', value: t.description },
       { key: 'maintenanceType', label: 'Tipo (opcional)', type: 'select', options: [{ value: '', label: 'Selecione' }, ...TIPOS], value: t.maintenanceType },
       { key: 'os', label: 'Nº da OS', placeholder: 'Opcional', value: t.os },
+      { key: 'tag', label: 'TAG do equipamento', placeholder: 'Ex.: EQ-12 (vai no bloco de OM)', value: t.tag },
       { key: 'progress', label: 'Execução (%)', type: 'number', placeholder: 'De 0 a 100', value: t.progress ?? '' },
       { key: 'area', label: 'Área', placeholder: 'Área', value: t.area },
     ];
@@ -626,6 +627,7 @@ window.Screens = (() => {
       const progresso = Math.max(0, Math.min(100, Number.isFinite(bruto) ? bruto : 0));
       return {
         os: valores.os || '',
+        tag: valores.tag || '',
         maintenanceType: valores.maintenanceType || '',
         description: desc,
         progress: progresso,
@@ -696,7 +698,7 @@ window.Screens = (() => {
             const t = achada.tarefa;
             Store.update(rdo.id, (d) => {
               d.tasks.push({
-                id: Store.uid(), backlogDe: achada.chave, os: t.os || '', maintenanceType: 'Backlog',
+                id: Store.uid(), backlogDe: achada.chave, os: t.os || '', tag: t.tag || '', maintenanceType: 'Backlog',
                 description: t.description, progress: Number(t.progress) || 0, area: t.area || '', status: 'Em Andamento',
               });
             });
