@@ -1,16 +1,24 @@
-/* PDF A4 conforme item 4 da especificação: jsPDF + autotable, laranja e cinza. */
+/* PDF A4 no formulário "RDO ADM" do cliente (modelo de 09/11/2026): jsPDF + autotable. */
 window.Pdf = (() => {
   'use strict';
 
   const ORANGE = [255, 87, 34];
   const GRAY = [243, 243, 243];
 
+  // formulário "RDO ADM": laranja do cliente, linhas pretas finas, texto preto
+  const LARANJA = [247, 150, 70];
+  const CINZA = [242, 242, 242];
+  const TINTA = [25, 25, 25];
+  const PAD = 1.6;
+  // larguras das colunas B..M do formulário, na escala A4 (190 mm de área útil)
+  const COLUNAS = [6.66, 16.02, 21.19, 16.43, 14.8, 23.63, 11, 19.56, 14.8, 12.77, 16.57, 16.57];
+
   const fmtDate = (iso) => {
     const [a, m, d] = String(iso || '').slice(0, 10).split('-');
     return a ? `${d}/${m}/${a}` : '—';
   };
 
-  /** Faixa laranja do topo com o título e a logo In-Haus (RDO e resumo do mês). */
+  /** Faixa laranja do topo com o título e a logo In-Haus (resumo do mês). */
   function faixa(doc, titulo, margem) {
     const larg = doc.internal.pageSize.getWidth();
     doc.setFillColor(...ORANGE);
@@ -48,165 +56,167 @@ window.Pdf = (() => {
     }
   }
 
-  /** Monta o PDF inteiro (com as fotos) e devolve o documento e o nome do arquivo. */
-  async function montar(rdo) {
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
+  /**
+   * Rodapé do formulário em todas as páginas: empresa, CNPJ e, embaixo, de qual RDO é a
+   * página. `paginas` liga cada página ao RDO dela (PDF de um dia ou de um período).
+   */
+  function rodapeFormulario(doc, paginas) {
     const larg = doc.internal.pageSize.getWidth();
     const alt = doc.internal.pageSize.getHeight();
-    const margem = 14;
-    let y = 0;
-
-    // 1. faixa laranja no topo
-    faixa(doc, 'RELATÓRIO DIÁRIO DE OBRA', margem);
-    y = 33;
-
-    // 2. identificação
-    doc.setTextColor(30, 30, 30);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(11);
-    // só entra o que foi preenchido: campo vazio não vira texto inventado no PDF
-    const juntar = (partes, sep = '  ·  ') => partes.filter(Boolean).join(sep);
-    doc.text(juntar([`RDO Nº ${rdo.number}`, fmtDate(rdo.date), rdo.shift && `Turno ${rdo.shift}`, rdo.maintenanceType]), margem, y);
-    y += 6;
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9.5);
-    doc.setTextColor(90, 90, 90);
-    const linhas = [
-      // local / mina digitado à mão: pode ser longo, quebra na largura da página
-      juntar([rdo.location && `Local: ${rdo.location}`, rdo.weather && `Clima: ${rdo.weather}`]),
-      juntar([
-        rdo.supervisor && `Supervisor: ${rdo.supervisor}`,
-        (rdo.startTime || rdo.endTime) && `${rdo.startTime || '—'} às ${rdo.endTime || '—'}`,
-      ], '   ·   '),
-    ].filter(Boolean);
-    for (const linha of linhas) {
-      for (const parte of doc.splitTextToSize(linha, larg - margem * 2)) {
-        doc.text(parte, margem, y);
-        y += 3.5;
-      }
-    }
-    doc.setDrawColor(...ORANGE);
-    doc.setLineWidth(0.7);
-    doc.line(margem, y + 1, larg - margem, y + 1);
-    y += 7;
-
-    const tabela = (titulo, cols, corpo, opts = {}) => {
-      if (!corpo.length) return;
+    const total = doc.getNumberOfPages();
+    const empresa = String(window.Store.config.companyName || '').trim();
+    for (let p = 1; p <= total; p += 1) {
+      doc.setPage(p);
+      const info = paginas.find((x) => p >= x.de && p <= x.ate);
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.2);
+      doc.line(10, alt - 16, larg - 10, alt - 16);
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9.5);
-      doc.setTextColor(...(opts.headColor || ORANGE));
-      doc.text(titulo, margem, y);
-      y += 2.5;
-      doc.autoTable({
-        startY: y,
-        margin: { left: margem, right: margem },
-        head: [cols],
-        body: corpo,
-        theme: 'grid',
-        styles: { font: 'helvetica', fontSize: 8.5, cellPadding: 2, textColor: [40, 40, 40], lineColor: [220, 220, 220], lineWidth: 0.15 },
-        headStyles: { fillColor: opts.headColor || ORANGE, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8.5 },
-        alternateRowStyles: { fillColor: GRAY },
-        columnStyles: opts.columnStyles || {},
-        didParseCell: (data) => {
-          if (data.section === 'body' && opts.colorir) {
-            const cor = opts.colorir(data.row.index, data.column.index, data.cell);
-            if (cor) { data.cell.styles.textColor = cor.texto; data.cell.styles.fontStyle = 'bold'; }
-          }
-        },
-      });
-      y = doc.lastAutoTable.finalY + 7;
-    };
+      doc.setFontSize(7.5);
+      doc.setTextColor(...TINTA);
+      doc.text(empresa.toUpperCase(), 10, alt - 11.5);
+      const cnpj = String(info?.rdo?.cnpj ?? window.Store.config.cnpj ?? '').trim();
+      if (cnpj) doc.text(`CNPJ: ${cnpj}`, larg - 10, alt - 11.5, { align: 'right' });
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7);
+      doc.setTextColor(90, 90, 90);
+      const linha = [info?.rdo?.number && `RDO ${info.rdo.number}`, info?.rdo?.date && fmtDate(info.rdo.date), total > 1 && `página ${p} de ${total}`]
+        .filter(Boolean).join(' · ');
+      if (linha) doc.text(linha, larg / 2, alt - 7.5, { align: 'center' });
+    }
+  }
 
-    // 3. mão de obra
-    tabela(
-      '1. MÃO DE OBRA',
-      ['Nome', 'Função', 'Equipe', 'Status'],
-      rdo.workforce.map((w) => [w.name, w.role || '—', w.team || '—', w.status]),
-      {
-        columnStyles: { 0: { cellWidth: 62 }, 1: { cellWidth: 45 }, 2: { cellWidth: 45 } },
-        colorir: (linha, coluna, cell) => {
-          if (coluna !== 3 || cell.text[0] !== 'Falta') return null;
-          return { texto: [198, 40, 40] };
-        },
-      },
-    );
+  /** Documento A4 vazio (um RDO por PDF, ou vários RDOs no mesmo arquivo). */
+  function novoDoc() {
+    const { jsPDF } = window.jspdf;
+    return new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
+  }
 
-    // 4. equipamentos
-    tabela(
-      '2. EQUIPAMENTOS',
-      ['Equipamento', 'Código', 'Status', 'Horímetro'],
-      rdo.equipmentList.map((e) => {
-        const h = (v) => (v == null || v === '' ? '—' : `${v}h`);
-        return [e.name, e.code || '—', e.status || '—', `${h(e.hoursStart)} - ${h(e.hoursEnd)}`];
-      }),
-      { columnStyles: { 0: { cellWidth: 62 }, 3: { halign: 'right', cellWidth: 34 } } },
-    );
+  /** Célula do formulário: quadro com borda, fundo opcional e texto que cabe na largura. */
+  function celula(doc, x, y, w, h, texto, o = {}) {
+    const size = o.size || 8;
+    if (o.fill) {
+      doc.setFillColor(...o.fill);
+      doc.rect(x, y, w, h, 'F');
+    }
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.18);
+    doc.rect(x, y, w, h, 'S');
+    const txt = texto == null ? '' : String(texto);
+    if (!txt.trim()) return;
+    doc.setFont('helvetica', o.bold ? 'bold' : 'normal');
+    doc.setFontSize(size);
+    doc.setTextColor(...(o.color || TINTA));
+    const linhas = doc.splitTextToSize(txt, Math.max(2, w - PAD * 2));
+    const lh = size * 0.3528 * 1.15;
+    const cabem = Math.max(1, Math.floor((h - PAD) / lh));
+    if (linhas.length > cabem) throw new Error('Texto excede a altura da célula do PDF.');
+    const desenhar = linhas;
+    let base;
+    if (o.valign === 'top') base = y + PAD + size * 0.3528 * 0.85;
+    else base = y + h / 2 - ((desenhar.length - 1) * lh) / 2 + size * 0.3528 * 0.35;
+    const tx = o.align === 'center' ? x + w / 2 : o.align === 'right' ? x + w - PAD : x + PAD;
+    doc.text(desenhar, tx, base, { align: o.align || 'left' });
+  }
 
-    // 5. atividades
-    tabela(
-      '3. ATIVIDADES REALIZADAS',
-      ['OS', 'Tipo', 'Descrição', 'Progresso', 'Status'],
-      rdo.tasks.map((t) => [t.os || '—', t.maintenanceType || '—', t.description, `${Number(t.progress) || 0}%`, t.status || '—']),
-      {
-        columnStyles: { 0: { cellWidth: 22 }, 1: { cellWidth: 24 }, 2: { cellWidth: 72 }, 3: { halign: 'right', cellWidth: 20 } },
-        colorir: (linha, coluna, cell) => {
-          if (coluna !== 4) return null;
-          return cell.text[0] === 'Concluído' ? { texto: [46, 125, 50] } : { texto: [178, 106, 0] };
-        },
-      },
-    );
-
-    // 6. ocorrências — cabeçalho vermelho, omitida quando vazia
-    tabela(
-      '4. OCORRÊNCIAS',
-      ['Tipo', 'Descrição', 'Hora'],
-      rdo.occurrences.map((o) => [o.type, o.description, o.time || '—']),
-      {
-        headColor: [198, 40, 40],
-        columnStyles: { 0: { cellWidth: 32 }, 2: { halign: 'right', cellWidth: 20 } },
-      },
-    );
-
-    // horas paradas, com o total do dia na última linha (omitida quando vazia)
+  /**
+   * Desenha um RDO inteiro no formulário do cliente, a partir da página atual
+   * (ou de uma página nova). O PDF de um período chama esta função para cada RDO.
+   */
+  async function escrever(doc, rdo, { primeira = true } = {}) {
+    // RDO antigo (ou vindo do banco): ganha as etapas e os campos do formulário
+    rdo = Store.completo(rdo);
+    const tasks = rdo.tasks || [];
+    const equips = rdo.equipmentList || [];
     const paradas = rdo.stoppages || [];
-    const minutos = (p) => window.Store.minutosParada?.(p) ?? 0;
-    const horas = (m) => window.Store.fmtHoras?.(m) ?? `${m} min`;
-    const totalParado = paradas.reduce((s, p) => s + minutos(p), 0);
-    tabela(
-      '5. HORAS PARADAS',
-      ['Motivo', 'Início', 'Fim', 'Duração', 'Observação'],
-      paradas.length
-        ? [...paradas.map((p) => [p.reason, p.start, p.end, horas(minutos(p)), p.note || '—']), ['TOTAL PARADO', '', '', horas(totalParado), '']]
-        : [],
-      {
-        headColor: [178, 106, 0],
-        columnStyles: { 0: { cellWidth: 44 }, 1: { cellWidth: 18 }, 2: { cellWidth: 18 }, 3: { halign: 'right', cellWidth: 22 } },
-        colorir: (linha, coluna, cell) => (linha === paradas.length ? { texto: [178, 106, 0] } : null),
-      },
-    );
+    const ocorrencias = rdo.occurrences || [];
+    const equipe = rdo.workforce || [];
+    const fotos = rdo.photos || [];
+    const larg = doc.internal.pageSize.getWidth();
+    const alt = doc.internal.pageSize.getHeight();
+    const margem = 10;
+    const fim = alt - 20; // o rodapé do formulário ocupa os últimos 16 mm
 
-    // 6. registro fotográfico: as fotos vão junto no PDF, duas por linha, carimbo embaixo
-    if (rdo.photos.length) {
-      const imagens = await Promise.all(rdo.photos.map((p) => (window.Fotos ? window.Fotos.imagem(p) : (p.data || null))));
+    if (!primeira) doc.addPage();
+    let y = 12;
+
+    const rotulo = { fill: LARANJA, color: [255, 255, 255], bold: true, size: 8.5, align: 'center' };
+
+    // O AutoTable quebra inclusive uma única célula longa entre páginas.
+    // Campos vazios continuam vazios; supervisor é dado, não assinatura.
+    const rows = [];
+    const section = text => rows.push([{ content: text, colSpan: 3, styles: { fillColor: LARANJA, textColor: [0, 0, 0], fontStyle: 'bold' } }]);
+    const row = (key, value) => rows.push([
+      { content: String(key ?? ''), colSpan: 1 },
+      { content: String(value ?? ''), colSpan: 2 },
+    ]);
+    section('RELATÓRIO DIÁRIO DE OBRA');
+    section('Dados Contrato / Dados da Atividade');
+    [['Contrato:', rdo.contractName], ['Cliente:', rdo.cliente], ['DATA', fmtDate(rdo.date)],
+      ['Complexo', rdo.complexo], ['Gerência:', rdo.gerencia], ['EQUIPE/ COORDENAÇÃO:', rdo.equipeCoord],
+      ['Objeto:', rdo.objeto], ['Local / Mina / Turno', [rdo.location, rdo.shift].filter(Boolean).join(' — ')],
+      ['Supervisor In Haus:', rdo.supervisor]].forEach(v => row(...v));
+    section('Registro de Execução de Atividades — REGISTRO DE HORAS');
+    Store.ETAPAS.forEach((nome, i) => rows.push([
+      { content: `${i + 1}. ${nome}`, colSpan: 2 },
+      { content: `INÍCIO: ${rdo.etapas[i]?.inicio || ''}\nFIM: ${rdo.etapas[i]?.fim || ''}` },
+    ]));
+    section('OBSERVAÇÕES/DESVIOS/MOTIVO DA NÃO EXECUÇÃO DA ATIVIDADE');
+    row('', rdo.notes);
+    (tasks.length ? tasks : [{}]).forEach(t => {
+      section('Nº OM / TÍTULO / LOCAL / DESCRIÇÃO DETALHADA :');
+      row('OM / Tipo / Local', [t.os, t.maintenanceType, t.area].filter(Boolean).join(' — '));
+      row('Descrição', t.description);
+      const preenchido = t.progress != null && t.progress !== '';
+      const p = Number(t.progress);
+      const marca = v => v ? '( x )' : '(   )';
+      row('STATUS OM', `CONCLUIDO ${marca(preenchido && p >= 100)} EM ANDAMENTO ${marca(preenchido && p > 0 && p < 100)} NÃO EXECUTADO ${marca(preenchido && p === 0)}`);
+    });
+    if (equips.length) section('EQUIPAMENTOS');
+    equips.forEach(e => {
+      row('Equipamento', e.name); row('Código / Status', [e.code, e.status].filter(Boolean).join(' — '));
+      row('Horímetro', [e.hoursStart, e.hoursEnd].map(v => v == null || v === '' ? '' : `${v}h`).join(' a '));
+    });
+    if (paradas.length) section('HORAS PARADAS');
+    paradas.forEach(p => {
+      row('Motivo', p.reason); row('Início / Fim / Duração', [p.start, p.end, Store.fmtHoras(Store.minutosParada(p))].filter(Boolean).join(' — ')); row('Observação', p.note);
+    });
+    if (paradas.length) row('TOTAL PARADO', Store.fmtHoras(paradas.reduce((s, p) => s + (Store.minutosParada(p) || 0), 0)));
+    section('OBSERVAÇÕES:');
+    ocorrencias.forEach(o => row([o.time, o.type].filter(Boolean).join(' — '), [o.description, o.location].filter(Boolean).join(' — ')));
+    if (equipe.length) section('Funcionário In Haus / Função / Equipe');
+    equipe.forEach(w => rows.push([
+      String(`${w.name || ''}${w.status === 'Falta' ? ' (falta)' : ''}`),
+      String(w.role || ''), String(w.team || ''),
+    ]));
+    doc.autoTable({
+      startY: y, margin: { top: 12, bottom: 20, left: margem, right: margem },
+      body: rows, theme: 'grid', rowPageBreak: 'auto',
+      styles: { font: 'helvetica', fontSize: 8, cellPadding: PAD, overflow: 'linebreak', textColor: TINTA, lineColor: [0, 0, 0], lineWidth: 0.18 },
+      columnStyles: { 0: { cellWidth: 65 }, 1: { cellWidth: 90 }, 2: { cellWidth: 35 } },
+    });
+    y = doc.lastAutoTable.finalY;
+
+    // 9. registro fotográfico: as fotos vão junto no PDF, duas por linha, carimbo embaixo
+    if (fotos.length) {
+      const imagens = await Promise.all(fotos.map((p) => (window.Fotos ? window.Fotos.imagem(p) : (p.data || null))));
       const espaco = 6;
       const colL = (larg - margem * 2 - espaco) / 2;
       const fotoA = 64;
       const linhaA = fotoA + 15;
       const novaPagina = () => { doc.addPage(); y = 18; };
-      if (y + 6 + linhaA > alt - 18) novaPagina();
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9.5);
-      doc.setTextColor(...ORANGE);
-      doc.text('6. REGISTRO FOTOGRÁFICO', margem, y);
-      y += 3;
-      rdo.photos.forEach((p, i) => {
+      if (y + 6 + linhaA > fim) novaPagina();
+      celula(doc, margem, y, larg - margem * 2, 6.4, 'REGISTRO FOTOGRÁFICO', rotulo);
+      y += 6.4;
+      fotos.forEach((p, i) => {
         const coluna = i % 2;
         if (coluna === 0 && i > 0) y += linhaA;
-        if (coluna === 0 && y + linhaA > alt - 18) novaPagina();
+        if (coluna === 0 && y + linhaA > fim) novaPagina();
         const x = margem + coluna * (colL + espaco);
-        doc.setFillColor(...GRAY);
-        doc.rect(x, y, colL, fotoA, 'F');
+        doc.setFillColor(...CINZA);
+        doc.setDrawColor(0, 0, 0);
+        doc.setLineWidth(0.18);
+        doc.rect(x, y, colL, fotoA, 'FD');
         try {
           const props = doc.getImageProperties(imagens[i]);
           const escala = Math.min(colL / props.width, fotoA / props.height);
@@ -221,21 +231,53 @@ window.Pdf = (() => {
         }
         const gps = p.latitude != null && p.longitude != null
           ? `GPS ${Number(p.latitude).toFixed(6)}, ${Number(p.longitude).toFixed(6)}` : '';
-        const legenda = juntar([`Foto ${i + 1}`, juntar([p.date && fmtDate(p.date), p.time], ' '), gps, p.desc], ' · ');
+        const legenda = [ `Foto ${i + 1}`, [p.date && fmtDate(p.date), p.time].filter(Boolean).join(' '), gps, p.desc].filter(Boolean).join(' · ');
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(7.5);
         doc.setTextColor(60, 60, 60);
-        doc.text(doc.splitTextToSize(legenda, colL).slice(0, 3), x, y + fotoA + 3.5);
+        doc.text(doc.splitTextToSize(`Foto ${i + 1}`, colL), x, y + fotoA + 3.5);
       });
       y += linhaA + 3;
+      // Legendas completas em tabela paginada, sem limite de três linhas.
+      doc.autoTable({ startY: Math.min(y, fim), margin: { top: 12, bottom: 20, left: margem, right: margem },
+        body: fotos.map((p, i) => [`Foto ${i + 1}`, [p.date && fmtDate(p.date), p.time,
+          p.latitude != null && p.longitude != null ? `GPS ${Number(p.latitude).toFixed(6)}, ${Number(p.longitude).toFixed(6)}` : '', p.desc].filter(Boolean).join(' — ')]),
+        theme: 'grid', styles: { fontSize: 8, cellPadding: PAD, overflow: 'linebreak' }, columnStyles: { 0: { cellWidth: 22 } } });
     }
+  }
 
-    // sem linhas de assinatura (pedido do usuário em 07/11/2026): o PDF termina nas fotos
-
-    // rodapé em todas as páginas: número do RDO, data e página
-    rodape(doc, [window.Store.config.companyName, `RDO ${rdo.number}`, fmtDate(rdo.date), rdo.status === 'final' && 'finalizado']);
-
+  /** Monta o PDF de um RDO (com as fotos) e devolve o documento e o nome do arquivo. */
+  async function montar(rdo) {
+    const doc = novoDoc();
+    await escrever(doc, rdo);
+    rodapeFormulario(doc, [{ de: 1, ate: doc.getNumberOfPages(), rdo }]);
     return { doc, nome: `RDO_${rdo.number}.pdf` };
+  }
+
+  /**
+   * PDF de vários RDOs num arquivo só (dia com mais de um RDO, ou período): um RDO por
+   * página inicial, na ordem recebida, com o rodapé do formulário em cada página.
+   */
+  async function montarVarios(rdos, { titulo = 'RDOs', nome } = {}) {
+    const doc = novoDoc();
+    const lista = Array.isArray(rdos) ? rdos.filter(Boolean) : [];
+    if (!lista.length) throw new Error('Nenhum RDO para gerar.');
+    const paginas = [];
+    for (let i = 0; i < lista.length; i += 1) {
+      const de = doc.getNumberOfPages() + (i === 0 ? 0 : 1);
+      await escrever(doc, lista[i], { primeira: i === 0 });
+      paginas.push({ de, ate: doc.getNumberOfPages(), rdo: lista[i] });
+    }
+    rodapeFormulario(doc, paginas);
+    return { doc, nome: nome || `${String(titulo || 'RDOs').replace(/[^\w\-]+/g, '_')}.pdf` };
+  }
+
+  /** PDF de vários RDOs baixado (navegador) ou entregue ao compartilhar (APK). */
+  async function gerarVarios(rdos, opcoes) {
+    const { doc, nome } = await montarVarios(rdos, opcoes);
+    if (nativo()?.Filesystem && nativo()?.Share) return compartilharNativo(doc, nome, 'Salvar ou enviar o PDF');
+    doc.save(nome);
+    return 'baixado';
   }
 
   const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
@@ -360,5 +402,5 @@ window.Pdf = (() => {
     };
   }
 
-  return { gerar, preparar, resumoMes, nomeMes };
+  return { gerar, preparar, gerarVarios, montarVarios, resumoMes, nomeMes };
 })();

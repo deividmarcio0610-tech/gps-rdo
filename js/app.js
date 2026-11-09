@@ -18,7 +18,7 @@
   };
 
   // telas que funcionam sem um RDO aberto (a de apagar não pode recriar o que acabou de sumir)
-  const SEM_RDO = new Set(['home', 'reports', 'backup', 'month', 'roster', 'conta']);
+  const SEM_RDO = new Set(['home', 'reports', 'backup', 'month', 'roster', 'conta', 'equipe']);
 
   // APK sempre da última versão publicada no GitHub (fora do service worker do site)
   const APK_URL = 'https://github.com/deividmarcio0610-tech/gps-rdo/releases/latest/download/GPS-RDO.apk';
@@ -139,11 +139,11 @@
   }
 
   /*
-   * Portão da conta: sem login (e sem "Continuar sem conta"), o app abre na tela de conta.
+   * Portão da conta: a conta é obrigatória — sem login o app abre na tela de entrar/criar.
    * Com a sessão guardada, tudo funciona sem internet: os RDOs sobem quando a rede volta.
    */
   function portaoDeConta() {
-    if (window.Conta?.ativo?.() || window.Conta?.semConta?.()) return false;
+    if (window.Conta?.ativo?.()) return false;
     const definicao = Conta.tela();
     el.titulo.textContent = definicao.titulo;
     el.tela.innerHTML = definicao.html;
@@ -244,6 +244,8 @@
 
   // conta logada: os RDOs do aparelho passam a ser os dessa conta
   if (Conta.ativo()) Store.usarConta(Conta.usuario().id);
+  // banco na nuvem: acompanha a sessão e troca os RDOs quando houver internet
+  Conta.iniciar?.();
 
   Pwa.escutarConvite();
   Pwa.registrar();
@@ -260,7 +262,7 @@
 
   // atalhos do manifest (?abrir=photos / ?abrir=report)
   const atalho = new URLSearchParams(location.search).get('abrir');
-  const telasValidas = ['header', 'workforce', 'equipment', 'tasks', 'occurrences', 'stops', 'photos', 'report', 'reports', 'backup', 'month', 'roster', 'conta'];
+  const telasValidas = ['header', 'etapas', 'workforce', 'equipment', 'tasks', 'occurrences', 'stops', 'photos', 'report', 'reports', 'backup', 'month', 'roster', 'conta', 'equipe'];
   if (atalho && telasValidas.includes(atalho)) {
     estado.pilha.push(atalho);
     marcar(false);

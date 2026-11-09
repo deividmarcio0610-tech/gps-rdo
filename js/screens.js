@@ -9,6 +9,7 @@ window.Screens = (() => {
   const TITULOS = {
     home: 'Selecione a Ação',
     header: 'Cabeçalho do RDO',
+    etapas: 'Etapas do Dia',
     workforce: 'Mão de Obra',
     equipment: 'Equipamentos',
     tasks: 'Tarefas Realizadas',
@@ -21,6 +22,7 @@ window.Screens = (() => {
     stops: 'Horas Paradas',
     month: 'Resumo do Mês',
     conta: 'Minha Conta',
+    equipe: 'RDOs da Equipe',
   };
 
   // -------------------------------------------------------------- filtro dos RDOs
@@ -128,6 +130,10 @@ window.Screens = (() => {
         ${rdo ? `<div class="rdo-aberto">RDO aberto: <strong>${esc(rdo.number)}</strong> · ${fmtDate(rdo.date)}${rdo.maintenanceType ? ` · ${esc(rdo.maintenanceType)}` : ''}</div>` : ''}
         <div class="action-grid">
           <button class="action-card" data-go="header">${icon('file')}Cabeçalho do RDO</button>
+          <button class="action-card" data-go="etapas">${icon('clock')}Etapas do Dia${(() => {
+            const n = (rdo?.etapas || []).filter((e) => e.inicio || e.fim).length;
+            return n ? `<span class="badge-count">${n}</span>` : '';
+          })()}</button>
           <button class="action-card" data-go="workforce">${icon('users')}Mão de Obra${contagem('workforce')}</button>
           <button class="action-card" data-go="equipment">${icon('truck')}Equipamentos${contagem('equipmentList')}</button>
           <button class="action-card" data-go="tasks">${icon('clipboard')}Tarefas Realizadas${contagem('tasks')}</button>
@@ -136,6 +142,7 @@ window.Screens = (() => {
           <button class="action-card" data-go="photos">${icon('camera')}Fotos do RDO${contagem('photos')}</button>
           <button class="action-card" data-go="month">${icon('chart')}Resumo do Mês</button>
           <button class="action-card wide" data-go="report">${icon('output', 22)}Gerar Relatório</button>
+          ${window.Conta?.ehMestre?.() ? `<button class="action-card wide" data-go="equipe">${icon('users', 20)}RDOs da Equipe</button>` : ''}
           <button class="action-card wide neutro-card" data-go="backup">${icon('shield', 20)}Cópia de Segurança</button>
           <button class="action-card wide neutro-card" data-go="conta">${icon('lock', 20)}Minha Conta</button>
           <button class="action-card wide danger-card" data-go="reports">${icon('trash', 20)}Apagar Relatórios</button>
@@ -194,6 +201,30 @@ window.Screens = (() => {
             <label for="h-date">Data</label>
             <input id="h-date" type="date" value="${esc(rdo.date)}" data-key="date">
           </div>
+          <div class="field">
+            <label for="h-contrato">Contrato</label>
+            <input id="h-contrato" type="text" value="${esc(rdo.contractName || '')}" data-key="contractName" placeholder="Nº do contrato" autocomplete="off" maxlength="60">
+          </div>
+          <div class="field">
+            <label for="h-cliente">Cliente</label>
+            <input id="h-cliente" type="text" value="${esc(rdo.cliente || '')}" data-key="cliente" placeholder="Ex.: VALE/MARIANA" autocomplete="off" maxlength="60">
+          </div>
+          <div class="field">
+            <label for="h-complexo">Complexo</label>
+            <input id="h-complexo" type="text" value="${esc(rdo.complexo || '')}" data-key="complexo" placeholder="Ex.: FAZENDÃO" autocomplete="off" maxlength="60">
+          </div>
+          <div class="field">
+            <label for="h-gerencia">Gerência</label>
+            <input id="h-gerencia" type="text" value="${esc(rdo.gerencia || '')}" data-key="gerencia" placeholder="Ex.: GERENCIA DE MANUTENÇÃO" autocomplete="off" maxlength="80">
+          </div>
+          <div class="field full">
+            <label for="h-equipe">Equipe / Coordenação</label>
+            <input id="h-equipe" type="text" value="${esc(rdo.equipeCoord || '')}" data-key="equipeCoord" placeholder="Ex.: Deivid/Fazendão" autocomplete="off" maxlength="80">
+          </div>
+          <div class="field full">
+            <label for="h-objeto">Objeto</label>
+            <textarea id="h-objeto" data-key="objeto" placeholder="Objeto do contrato, como no formulário do cliente">${esc(rdo.objeto || '')}</textarea>
+          </div>
           <div class="field full">
             <label for="h-tipo">Tipo de manutenção</label>
             <select id="h-tipo" data-key="maintenanceType">${opcoes(TIPOS, rdo.maintenanceType)}</select>
@@ -243,9 +274,14 @@ window.Screens = (() => {
                 renumerado = d.number;
               }
             }
-            // contrato fixo saiu: a mina/obra vai no Local, digitado à mão
+            // contrato, cliente e objeto: o cabeçalho do formulário "RDO ADM" do cliente
             d.contractId = '';
-            d.contractName = '';
+            d.contractName = ler('contractName').value.trim();
+            d.cliente = ler('cliente').value.trim();
+            d.complexo = ler('complexo').value.trim();
+            d.gerencia = ler('gerencia').value.trim();
+            d.equipeCoord = ler('equipeCoord').value.trim();
+            d.objeto = ler('objeto').value.trim();
             d.maintenanceType = ler('maintenanceType').value;
             d.location = ler('location').value.trim();
             d.shift = ler('shift').value;
@@ -257,6 +293,52 @@ window.Screens = (() => {
           });
           if (!salvo) { toast('Não foi possível salvar: o aparelho está sem espaço.'); return; }
           toast(renumerado ? `Cabeçalho salvo. Com a data nova o RDO passou a ser ${renumerado}.` : 'Cabeçalho salvo com sucesso');
+          app.voltar();
+        });
+      },
+    };
+  }
+
+  // -------------------------------------------------------------- etapas do dia
+
+  // registro de execução de atividades do formulário "RDO ADM": os nomes são fixos,
+  // quem preenche digita só a hora de início e a de fim de cada etapa.
+  function etapas(rdo) {
+    const trava = travado(rdo);
+    const horas = Store.completo(rdo).etapas;
+    return {
+      titulo: TITULOS.etapas,
+      html: `
+        ${trava ? avisoTravado(rdo) : ''}
+        <p class="dica">Horas de cada etapa do dia, como no formulário do cliente. O que ficar em branco sai em branco no PDF.</p>
+        <fieldset class="campos"${trava ? ' disabled' : ''}>
+          ${Store.ETAPAS.map((nome, i) => `
+            <div class="etapa">
+              <div class="etapa-nome">${i + 1}. ${esc(nome)}</div>
+              <div class="form-grid">
+                <div class="field">
+                  <label for="etapa-${i}-ini">Início</label>
+                  <input id="etapa-${i}-ini" type="time" data-etapa="${i}" data-campo="inicio" value="${esc(horas[i].inicio)}">
+                </div>
+                <div class="field">
+                  <label for="etapa-${i}-fim">Fim</label>
+                  <input id="etapa-${i}-fim" type="time" data-etapa="${i}" data-campo="fim" value="${esc(horas[i].fim)}">
+                </div>
+              </div>
+            </div>`).join('')}
+        </fieldset>
+        ${trava ? '' : '<button class="btn primary block" data-act="salvar-etapas">Salvar Etapas</button>'}`,
+      bind(root) {
+        root.querySelector('[data-act="salvar-etapas"]')?.addEventListener('click', () => {
+          const novas = Store.ETAPAS.map((_, i) => ({
+            inicio: root.querySelector(`[data-etapa="${i}"][data-campo="inicio"]`).value,
+            fim: root.querySelector(`[data-etapa="${i}"][data-campo="fim"]`).value,
+          }));
+          if (!Store.update(rdo.id, (d) => { d.etapas = novas; })) {
+            toast('Não foi possível salvar: o aparelho está sem espaço.');
+            return;
+          }
+          toast('Etapas salvas.');
           app.voltar();
         });
       },
@@ -1321,8 +1403,10 @@ window.Screens = (() => {
   }
 
   const conta = () => window.Conta.tela();
+  // tela da conta principal; quem não é a conta principal volta ao início
+  const equipe = (rdo) => (window.Mestre && window.Conta?.ehMestre?.() ? window.Mestre.tela(app) : home(rdo));
 
-  const mapa = { home, header, workforce, equipment, tasks, occurrences, stops, photos, report, reports, backup, month, roster, conta };
+  const mapa = { home, header, etapas, workforce, equipment, tasks, occurrences, stops, photos, report, reports, backup, month, roster, conta, equipe };
 
   return {
     boot(appRef) { app = appRef; },

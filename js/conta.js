@@ -1,17 +1,17 @@
 /*
- * Conta do funcionário na central: entrar, criar conta (com assinatura desenhada à mão),
- * esqueci a senha e o envio dos RDOs para a central.
+ * Conta do funcionário no banco na nuvem: entrar, criar conta (com assinatura desenhada à
+ * mão), esqueci a senha e a troca dos RDOs com o banco (js/nuvem.js).
  *
  * O aparelho guarda a sessão e os RDOs: no campo, sem sinal, o app abre e lança do mesmo
- * jeito; os RDOs vão para a central quando a internet volta. Sem conta, o app continua
- * valendo só neste aparelho ("Continuar sem conta").
+ * jeito; os RDOs sobem quando a internet volta e as correções do supervisor descem na
+ * próxima vez que o app abrir. A conta é obrigatória — sem ela o app não abre.
  */
 window.Conta = (() => {
   'use strict';
 
   const { esc, toast, sheet, icon, confirmar } = UI;
   const CHAVE = 'gps_rdo_conta_v1';
-  const CHAVE_SEM_CONTA = 'gps_rdo_sem_conta_v1';
+  const CHAVE_ENVIADOS = 'gps_rdo_enviado_v1';
 
   // o navegador do app vive no app.js; aqui só se pede redesenho por ele
   const redesenhar = () => window.__rdo?.app?.render?.();
@@ -28,145 +28,190 @@ window.Conta = (() => {
     } catch { /* sem espaço: a sessão fica só na memória */ }
   };
 
-  /** Central pública (VPS, HTTPS). Quem quiser outra digita em "Endereço da central". */
-  const CENTRAL_PADRAO = 'https://lubcontrol.dvdswap.com.br/rdo';
-
-  /** Endereço da central (sem barra no fim). */
-  const endereco = () => String(sessao?.endereco || Store.config.centralUrl || CENTRAL_PADRAO).trim().replace(/\/+$/, '');
-
-  function definirEndereco(url) {
-    const limpo = String(url || '').trim().replace(/\/+$/, '');
-    sessao = sessao || {};
-    sessao.endereco = limpo;
-    Store.setCentralUrl(limpo);
-    salvarSessao();
-    return limpo;
-  }
-
-  const ativo = () => Boolean(sessao?.token && sessao?.usuario?.id);
-  const semConta = () => !ativo() && localStorage.getItem(CHAVE_SEM_CONTA) === '1';
+  const ativo = () => Boolean(sessao?.usuario?.id);
   const usuario = () => sessao?.usuario || null;
+  const ehMestre = () => Boolean(sessao?.usuario?.mestre);
 
-  async function api(caminho, { metodo = 'GET', corpo, bruto = false } = {}) {
-    const base = endereco();
-    if (!base) throw new Error('Falta o endereço da central. Preencha em "Endereço da central".');
-    let r;
-    try {
-      r = await fetch(base + caminho, {
-        method: metodo,
-        headers: {
-          ...(sessao?.token ? { Authorization: `Bearer ${sessao.token}` } : {}),
-          ...(corpo ? { 'Content-Type': 'application/json' } : {}),
-        },
-        body: corpo ? JSON.stringify(corpo) : undefined,
-      });
-    } catch {
-      throw new Error('Sem conexão com a central. Tente quando tiver internet.');
-    }
-    if (bruto && r.ok) return r;
-    const dados = await r.json().catch(() => ({}));
-    if (r.status === 401 && ativo()) {
-      sessao.token = '';
-      salvarSessao();
-      throw new Error(dados.erro || 'Sua sessão venceu. Entre de novo.');
-    }
-    if (!r.ok) throw new Error(dados.erro || `Erro ${r.status} na central.`);
-    return dados;
-  }
-
-  function guardarLogin(dados, url) {
-    sessao = { token: dados.token, usuario: dados.usuario, endereco: (url || endereco()).trim().replace(/\/+$/, '') };
-    Store.setCentralUrl(sessao.endereco);
+  function usarPerfil(perfil) {
+    sessao = { usuario: perfil };
     salvarSessao();
-    localStorage.removeItem(CHAVE_SEM_CONTA);
-    // cada conta tem os seus RDOs neste aparelho; a primeira vez adota os que já estão aqui
-    Store.usarConta(dados.usuario.id);
+    Store.usarConta(perfil.id);
+    return perfil;
   }
 
-  const entrar = async (email, senha, url) => {
-    const dados = await api('/api/entrar', { metodo: 'POST', corpo: { email, senha } });
-    guardarLogin(dados, url);
-    return dados.usuario;
+  // ------------------------------------------------------------ entrar / sair
+
+  const entrar = async (email, senha) => {
+    const perfil = await Nuvem.entrar(email, senha);
+    usarPerfil(perfil);
+    return perfil;
   };
 
-  const cadastrar = async (dados, url) => {
-    const r = await api('/api/cadastrar', {
-      metodo: 'POST',
-      corpo: { nome: dados.nome, email: dados.email, senha: dados.senha, assinatura: dados.assinatura },
-    });
-    guardarLogin(r, url);
-    return r.usuario;
+  const cadastrar = async (dados) => {
+    const perfil = await Nuvem.cadastrar(dados);
+    usarPerfil(perfil);
+    return perfil;
   };
 
+  /** Manda o link de senha nova para o e-mail da conta (não precisa de código do supervisor). */
   const esqueci = async (email) => {
-    const r = await api('/api/esqueci', { metodo: 'POST', corpo: { email } });
-    return r.mensagem || 'Pedido registrado.';
-  };
-
-  const redefinir = async (email, codigo, senha) => {
-    const r = await api('/api/redefinir', { metodo: 'POST', corpo: { email, codigo, senha } });
-    guardarLogin(r);
-    return r.usuario;
-  };
-
-  const atualizarPerfil = async (campos) => {
-    const r = await api('/api/eu', { metodo: 'PUT', corpo: campos });
-    if (sessao) { sessao.usuario = r.usuario; salvarSessao(); }
-    return r.usuario;
+    await Nuvem.esqueci(email);
+    return `Se este e-mail tiver conta, o link para criar uma senha nova chega nele em instantes (veja também a caixa de spam).`;
   };
 
   async function sair() {
-    const tinha = ativo();
-    if (tinha) { try { await api('/api/sair', { metodo: 'POST' }); } catch { /* sem rede: sai do mesmo jeito */ } }
     const id = sessao?.usuario?.id;
+    try { await Nuvem.sair(); } catch { /* sem rede: sai do mesmo jeito */ }
     sessao = null;
     salvarSessao();
-    localStorage.removeItem(CHAVE_SEM_CONTA);
-    // volta ao modo sem conta sem apagar nada; quem entrar de novo reencontra os RDOs da conta
+    // nada é apagado do aparelho; quem entrar de novo reencontra os RDOs da conta
     Store.usarConta('');
     return id;
   }
 
-  // ------------------------------------------------------------ envio dos RDOs
+  // ------------------------------------------------------------ troca com o banco
 
   let timer = null;
-  let enviando = false;
+  let sincronizando = false;
+
+  const mapaEnviados = () => {
+    try { return JSON.parse(localStorage.getItem(`${CHAVE_ENVIADOS}:${sessao?.usuario?.id || ''}`) || '{}'); } catch { return {}; }
+  };
+  const marcarEnviado = (id, quando) => {
+    const mapa = mapaEnviados();
+    mapa[id] = quando;
+    try { localStorage.setItem(`${CHAVE_ENVIADOS}:${sessao?.usuario?.id || ''}`, JSON.stringify(mapa)); } catch { /* sem espaço: sobe de novo */ }
+  };
+
+  /** Sobe um RDO; se ele for de outra pessoa (supervisor corrigindo), grava no documento do dono. */
+  async function publicarUm(rdo) {
+    const meu = usuario();
+    if (!meu) return null;
+    if (rdo.dono && rdo.dono !== meu.id) return Nuvem.publicarComo(rdo.dono, rdo);
+    return Nuvem.publicar(rdo);
+  }
 
   /**
-   * Manda todos os RDOs do aparelho para a conta. O servidor regrava (upsert), então
-   * mandar de novo não duplica. Devolve {enviados} ou lança o erro da central.
+   * Traz um RDO do banco para o aparelho: o JSON inteiro e as fotos, que voltam para o
+   * IndexedDB deste aparelho (guardadas com o mesmo carimbo de antes).
    */
-  async function enviarTudo({ silencioso = false } = {}) {
-    if (!ativo() || !endereco()) return { enviados: 0, semConta: true };
-    if (enviando) return { enviados: 0, ocupado: true };
-    enviando = true;
+  async function baixarRdo(registro) {
+    const base = registro.json;
+    if (!base?.id || Store.find(base.id)) return false;
+    const rdo = { stoppages: [], ...base };
+    rdo.dono = registro.dono || null;
+    rdo.donoNome = registro.nome || '';
+    rdo._docId = registro.docId;
+    const metas = Array.isArray(rdo.photos) ? rdo.photos : [];
+    const imagens = await Nuvem.fotosDe(registro.docId).catch(() => []);
+    const fotos = [];
+    for (let i = 0; i < Math.max(metas.length, imagens.length); i += 1) {
+      const meta = metas[i] || {};
+      const guardada = imagens[i] ? await Fotos.salvar(imagens[i]).catch(() => null) : null;
+      if (guardada?.foto) fotos.push({ ...meta, foto: guardada.foto, data: undefined });
+      else if (imagens[i]) fotos.push({ ...meta, data: imagens[i] });
+    }
+    if (fotos.length) rdo.photos = fotos;
+    const entrou = Store.importar([rdo], {});
+    marcarEnviado(rdo.id, Number(rdo.atualizado) || 0);
+    return entrou > 0;
+  }
+
+  /**
+   * Acerta o aparelho com o banco: sobe o que mudou aqui e desce o que mudou lá
+   * (correção do supervisor, RDO feito em outro celular). Sem rede, não faz nada.
+   */
+  async function sincronizar({ silencioso = true } = {}) {
+    if (!ativo()) return { enviados: 0, recebidos: 0 };
+    if (!Nuvem.configurado()) return { enviados: 0, recebidos: 0, semBanco: true };
+    if (sincronizando) return { enviados: 0, recebidos: 0, ocupado: true };
+    sincronizando = true;
     try {
-      const rdos = Store.rdos;
-      if (!rdos.length) return { enviados: 0 };
-      const r = await api('/api/rdos', { metodo: 'POST', corpo: { rdos } });
-      if (!silencioso) toast(`${r.recebidos?.length || 0} RDO(s) enviado(s) para a central.`);
-      return { enviados: r.recebidos?.length || 0 };
+      const enviadosAntes = mapaEnviados();
+      const nuvem = await Nuvem.meusRdos();
+      const porId = new Map();
+      nuvem.forEach((n) => porId.set(n.json.id, n));
+
+      let enviados = 0;
+      let recebidos = 0;
+
+      for (const r of Store.rdos.slice()) {
+        const marca = Number(enviadosAntes[r.id]) || 0;
+        const quando = Number(r.atualizado) || 0;
+        if (!porId.has(r.id) || quando > marca) {
+          try {
+            await publicarUm(r);
+            marcarEnviado(r.id, quando);
+            enviados += 1;
+          } catch { /* sem rede ou sem permissão: tenta no próximo envio */ }
+        }
+      }
+
+      for (const n of nuvem) {
+        const local = Store.find(n.json.id);
+        if (!local) {
+          if (await baixarRdo(n).catch(() => false)) recebidos += 1;
+          continue;
+        }
+        if (n.atualizado > (Number(local.atualizado) || 0)) {
+          // correção vinda do banco: texto e listas; as fotos do aparelho ficam
+          Store.update(local.id, (x) => {
+            const fotos = x.photos?.length ? x.photos : (n.json.photos || []);
+            Object.assign(x, n.json, { photos: fotos, dono: n.dono, atualizado: n.atualizado });
+          });
+          marcarEnviado(local.id, n.atualizado);
+          recebidos += 1;
+        }
+      }
+
+      if (!silencioso) {
+        const partes = [];
+        if (enviados) partes.push(`${enviados} enviado(s)`);
+        if (recebidos) partes.push(`${recebidos} recebido(s)`);
+        toast(partes.length ? `Banco: ${partes.join(' · ')}.` : 'Tudo igual entre o aparelho e o banco.');
+      }
+      return { enviados, recebidos };
     } catch (e) {
       if (!silencioso) toast(e.message);
-      throw e;
+      return { enviados: 0, recebidos: 0, erro: e.message };
     } finally {
-      enviando = false;
+      sincronizando = false;
     }
   }
 
-  /** Agenda o envio (usado a cada gravação no aparelho); sem rede, tenta de novo depois. */
+  const enviarTudo = (opcoes) => sincronizar(opcoes);
+
+  /** Agenda a troca com o banco (usada a cada gravação no aparelho). */
   function agendar() {
-    if (!ativo() || !endereco()) return;
+    if (!ativo()) return;
     clearTimeout(timer);
-    timer = setTimeout(() => { enviarTudo({ silencioso: true }).catch(() => {}); }, 4000);
+    timer = setTimeout(() => { sincronizar({ silencioso: true }).catch(() => {}); }, 4000);
   }
 
-  /** Traz da central os RDOs desta conta que não estão no aparelho (celular novo). */
+  /** Só traz o que falta no aparelho (celular novo, cópia perdida). */
   async function recuperar() {
-    const r = await api('/api/rdos');
-    const novos = (r.rdos || []).filter((x) => x?.id && !Store.find(x.id));
-    if (!novos.length) return 0;
-    return Store.importar(novos, {});
+    const r = await sincronizar({ silencioso: true });
+    return r.recebidos || 0;
+  }
+
+  /** RDO apagado no aparelho sai do banco também. */
+  async function apagarNaNuvem(rdo) {
+    if (!ativo() || !rdo || !Nuvem.configurado()) return;
+    const dono = rdo.dono || usuario()?.id;
+    if (!dono) return;
+    await Nuvem.apagar(Nuvem.idDoc(dono, rdo.id)).catch(() => {});
+  }
+
+  /**
+   * Abre no aparelho um RDO de outra pessoa (supervisor): baixa do banco e devolve o id
+   * local para o app abrir. O campo `dono` marca de quem é, para a correção voltar certa.
+   */
+  async function abrirDoBanco(registro) {
+    const achado = Store.find(registro.json?.id);
+    if (achado) return achado.id;
+    const desceu = await baixarRdo(registro);
+    if (!desceu) throw new Error('Não foi possível abrir este RDO agora.');
+    return Store.find(registro.json.id)?.id || null;
   }
 
   // ------------------------------------------------------------ assinatura
@@ -263,34 +308,25 @@ window.Conta = (() => {
 
   // ------------------------------------------------------------ telas
 
-  let aba = 'entrar';      // entrar | criar | esqueci | redefinir
+  let aba = 'entrar';      // entrar | criar | esqueci
   let aviso = '';
   let avisoTipo = 'erro';
   let emailEsqueci = '';
 
   const mostrarAviso = (texto, tipo = 'erro') => { aviso = texto; avisoTipo = tipo; };
 
-  function campoEndereco(valor) {
-    return `
-      <details class="central-end"${valor ? '' : ' open'}>
-        <summary>Endereço da central</summary>
-        <div class="field">
-          <label for="c-url">Endereço da central (quem instalou o app informa)</label>
-          <input id="c-url" type="url" data-campo="url" value="${esc(valor)}" placeholder="${esc(CENTRAL_PADRAO)}" autocapitalize="off" spellcheck="false">
-        </div>
-        <p class="dica">Já vem com a central do supervisor (${esc(CENTRAL_PADRAO)}). Só troque se ele pedir.</p>
-      </details>`;
-  }
-
   const abas = () => `
     <div class="abas">
       ${[['entrar', 'Entrar'], ['criar', 'Criar conta'], ['esqueci', 'Esqueci a senha']].map(([v, t]) => `
-        <button type="button" class="aba${aba === v || (v === 'esqueci' && aba === 'redefinir') ? ' ativa' : ''}" data-aba="${v}">${t}</button>`).join('')}
+        <button type="button" class="aba${aba === v ? ' ativa' : ''}" data-aba="${v}">${t}</button>`).join('')}
     </div>`;
 
   const msgHtml = () => (aviso ? `<div class="aviso ${avisoTipo === 'ok' ? 'ok' : 'erro'}">${esc(aviso)}</div>` : '');
 
-  function htmlEntrar(url) {
+  const semBanco = () => (Nuvem.configurado() ? ''
+    : `<div class="aviso erro">O banco na nuvem ainda não foi ligado neste app. Quem publicou precisa colar a configuração do Firebase (js/firebase-config.js).</div>`);
+
+  function htmlEntrar() {
     return `
       ${abas()}
       <form data-form="entrar">
@@ -299,11 +335,10 @@ window.Conta = (() => {
         <div class="field"><label for="c-senha">Senha</label>
           <input id="c-senha" type="password" autocomplete="current-password" required></div>
         <button class="btn primary block" type="submit">Entrar</button>
-      </form>
-      ${campoEndereco(url)}`;
+      </form>`;
   }
 
-  function htmlCriar(url) {
+  function htmlCriar() {
     return `
       ${abas()}
       <form data-form="criar">
@@ -320,32 +355,22 @@ window.Conta = (() => {
           <p class="dica">Assine dentro do quadro, como no papel. A assinatura vai junto com os seus RDOs.</p>
         </div>
         <button class="btn primary block" type="submit">Criar minha conta</button>
-      </form>
-      ${campoEndereco(url)}`;
+      </form>`;
   }
 
-  function htmlEsqueci(url) {
+  function htmlEsqueci() {
     return `
       ${abas()}
       <form data-form="esqueci">
         <div class="field"><label for="s-email">E-mail da conta</label>
           <input id="s-email" type="email" autocapitalize="off" required value="${esc(emailEsqueci)}"></div>
-        <button class="btn primary block" type="submit">Pedir código</button>
-        <p class="dica">O pedido chega na central do Tiago Oliveira, que gera um código de 6 dígitos. Peça o código a ele e use a aba abaixo.</p>
-      </form>
-      <form data-form="redefinir" style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px">
-        <div class="field"><label for="r-codigo">Código de 6 dígitos</label>
-          <input id="r-codigo" type="text" inputmode="numeric" maxlength="6" pattern="[0-9]*" autocomplete="one-time-code" required></div>
-        <div class="field"><label for="r-senha">Nova senha (mínimo 6)</label>
-          <input id="r-senha" type="password" autocomplete="new-password" minlength="6" required></div>
-        <button class="btn primary block" type="submit">Definir nova senha</button>
-      </form>
-      ${campoEndereco(url)}`;
+        <button class="btn primary block" type="submit">Mandar o link por e-mail</button>
+        <p class="dica">O link chega no e-mail da conta e abre a tela de criar uma senha nova. Não precisa de código do supervisor.</p>
+      </form>`;
   }
 
   function htmlConta(logado) {
     const u = logado || {};
-    const end = endereco();
     return `
       <div class="card"><div class="body">
         <div class="name">${esc(u.nome || 'Sua conta')}</div>
@@ -353,33 +378,26 @@ window.Conta = (() => {
       </div></div>
       ${u.assinatura ? `<div class="field"><label>Sua assinatura</label><img class="assina-img" src="${esc(u.assinatura)}" alt="Assinatura"></div>` : ''}
       <button class="btn primary block" data-act="enviar">${icon('upload', 16)}Enviar meus RDOs agora</button>
-      <button class="btn ghost block" data-act="recuperar">${icon('download', 16)}Baixar meus RDOs da central</button>
+      <button class="btn ghost block" data-act="recuperar">${icon('download', 16)}Trazer os RDOs do banco</button>
       <button class="btn ghost block" data-act="senha">${icon('lock', 16)}Trocar a senha</button>
       <button class="btn ghost block" data-act="nova-assinatura">${icon('file', 16)}Desenhar a assinatura de novo</button>
-      <details class="central-end">
-        <summary>Endereço da central</summary>
-        <div class="field"><label for="c-url">Endereço</label>
-          <input id="c-url" type="url" data-campo="url" value="${esc(end)}" autocapitalize="off" spellcheck="false"></div>
-        <button class="btn ghost block" type="button" data-act="salvar-url">Salvar endereço</button>
-      </details>
       <button class="btn danger block" data-act="sair">Sair da conta</button>
-      <p class="dica">Ao sair, os RDOs desta conta ficam guardados no aparelho (e na central). Entrando de novo com a mesma conta, eles voltam.</p>`;
+      <p class="dica">Os RDOs desta conta ficam no aparelho e no banco na nuvem. Ao sair, nada é apagado:
+        entrando de novo com a mesma conta, eles voltam.</p>`;
   }
 
   /** Tela de conta do portão (sem login) e a do menu (logado). */
   function tela() {
-    const url = endereco();
     const html = ativo() ? htmlConta(usuario())
-      : `<div class="conta-topo">${icon('lock', 20)}<span>Entre na sua conta para os seus RDOs chegarem na central do supervisor. Sem conta, o app continua valendo só neste aparelho.</span></div>
+      : `<div class="conta-topo">${icon('lock', 20)}<span>Entre na sua conta. Os RDOs ficam no aparelho (funciona sem sinal) e chegam no banco do supervisor quando tiver internet.</span></div>
+         ${semBanco()}
          ${msgHtml()}
-         ${aba === 'criar' ? htmlCriar(url) : aba === 'esqueci' || aba === 'redefinir' ? htmlEsqueci(url) : htmlEntrar(url)}
-         <button class="btn ghost block" data-act="sem-conta" style="margin-top:16px">Continuar sem conta neste aparelho</button>`;
+         ${aba === 'criar' ? htmlCriar() : aba === 'esqueci' ? htmlEsqueci() : htmlEntrar()}`;
 
     return {
       titulo: ativo() ? 'Minha Conta' : 'Sua conta',
       html,
       bind(root) {
-        const urlDoCampo = () => root.querySelector('[data-campo="url"]')?.value || '';
         const ocupado = (botao, sim) => {
           if (!botao) return;
           if (sim) { botao.dataset.rotulo = botao.textContent; botao.disabled = true; botao.textContent = 'Aguarde...'; }
@@ -393,16 +411,15 @@ window.Conta = (() => {
           redesenhar();
         }));
 
-        // cada formulário salva o endereço digitado antes de chamar a central
         root.querySelector('[data-form="entrar"]')?.addEventListener('submit', async (ev) => {
           ev.preventDefault();
           aviso = '';
-          definirEndereco(urlDoCampo());
           ocupado(ev.submitter, true);
           try {
             await entrar(root.querySelector('#c-email').value.trim(), root.querySelector('#c-senha').value);
             toast('Você entrou na sua conta.');
             irParaInicio();
+            sincronizar({ silencioso: true }).catch(() => {});
           } catch (e) { falhar(e); }
         });
 
@@ -411,7 +428,6 @@ window.Conta = (() => {
           aviso = '';
           const assina = root.__assina;
           if (assina?.vazia()) { mostrarAviso('Desenhe sua assinatura no quadro antes de criar a conta.'); redesenhar(); return; }
-          definirEndereco(urlDoCampo());
           ocupado(ev.submitter, true);
           try {
             await cadastrar({
@@ -420,63 +436,42 @@ window.Conta = (() => {
               senha: root.querySelector('#n-senha').value,
               assinatura: assina.png(),
             });
-            toast('Conta criada. Seus RDOs já podem ir para a central.');
+            toast('Conta criada. Seus RDOs já podem ir para o banco.');
             irParaInicio();
+            sincronizar({ silencioso: true }).catch(() => {});
           } catch (e) { falhar(e); }
         });
 
         root.querySelector('[data-form="esqueci"]')?.addEventListener('submit', async (ev) => {
           ev.preventDefault();
           aviso = '';
-          definirEndereco(urlDoCampo());
           emailEsqueci = root.querySelector('#s-email').value.trim();
           ocupado(ev.submitter, true);
           try {
             const texto = await esqueci(emailEsqueci);
             mostrarAviso(texto, 'ok');
-            aba = 'esqueci';
             redesenhar();
-          } catch (e) { falhar(e); }
-        });
-
-        root.querySelector('[data-form="redefinir"]')?.addEventListener('submit', async (ev) => {
-          ev.preventDefault();
-          aviso = '';
-          definirEndereco(urlDoCampo());
-          ocupado(ev.submitter, true);
-          try {
-            await redefinir(emailEsqueci, root.querySelector('#r-codigo').value, root.querySelector('#r-senha').value);
-            toast('Senha nova definida. Você já está na conta.');
-            irParaInicio();
           } catch (e) { falhar(e); }
         });
 
         root.querySelector('[data-act="limpar-assina"]')?.addEventListener('click', () => root.__assina?.limpar());
         root.__assina = ligarAssinatura(root);
 
-        root.querySelector('[data-act="sem-conta"]')?.addEventListener('click', () => {
-          localStorage.setItem(CHAVE_SEM_CONTA, '1');
-          irParaInicio();
-        });
-
         // ---- conta aberta pelo menu
         root.querySelector('[data-act="enviar"]')?.addEventListener('click', async (ev) => {
           ocupado(ev.currentTarget, true);
-          try {
-            const r = await enviarTudo({ silencioso: true });
-            toast(r.enviados ? `${r.enviados} RDO(s) enviado(s).` : 'Nada novo para enviar.');
-          } catch (e) { toast(e.message); }
+          const r = await sincronizar({ silencioso: false });
           ocupado(ev.currentTarget, false);
+          if (r.erro) toast(r.erro);
         });
 
         root.querySelector('[data-act="recuperar"]')?.addEventListener('click', async (ev) => {
           ocupado(ev.currentTarget, true);
-          try {
-            const n = await recuperar();
-            toast(n ? `${n} RDO(s) voltaram da central.` : 'Todos os RDOs da central já estão aqui.');
-            if (n) redesenhar();
-          } catch (e) { toast(e.message); }
+          const r = await sincronizar({ silencioso: true });
           ocupado(ev.currentTarget, false);
+          if (r.erro) { toast(r.erro); return; }
+          toast(r.recebidos ? `${r.recebidos} RDO(s) vieram do banco.` : 'Todos os RDOs do banco já estão aqui.');
+          if (r.recebidos) redesenhar();
         });
 
         root.querySelector('[data-act="senha"]')?.addEventListener('click', async () => {
@@ -490,7 +485,7 @@ window.Conta = (() => {
           });
           if (!v) return;
           try {
-            await atualizarPerfil({ senhaAtual: v.atual, senhaNova: v.nova });
+            await Nuvem.trocarSenha(v.atual, v.nova);
             toast('Senha trocada.');
           } catch (e) { toast(e.message); }
         });
@@ -517,7 +512,8 @@ window.Conta = (() => {
             if (act === 'salvar') {
               if (assina.vazia()) { toast('Desenhe a assinatura primeiro.'); return; }
               try {
-                await atualizarPerfil({ assinatura: assina.png() });
+                const perfil = await Nuvem.salvarPerfil({ assinatura: assina.png() });
+                if (sessao) { sessao.usuario = perfil; salvarSessao(); }
                 toast('Assinatura atualizada.');
                 fechar();
                 redesenhar();
@@ -526,14 +522,9 @@ window.Conta = (() => {
           });
         });
 
-        root.querySelector('[data-act="salvar-url"]')?.addEventListener('click', () => {
-          definirEndereco(urlDoCampo());
-          toast('Endereço da central salvo.');
-        });
-
         root.querySelector('[data-act="sair"]')?.addEventListener('click', async () => {
           const ok = await confirmar('Sair da conta',
-            'Os RDOs desta conta ficam guardados no aparelho e na central. Para reabrir, entre de novo com o mesmo e-mail.', 'Sair');
+            'Os RDOs desta conta ficam guardados no aparelho e no banco. Para reabrir, entre de novo com o mesmo e-mail.', 'Sair');
           if (!ok) return;
           await sair();
           aba = 'entrar';
@@ -544,10 +535,38 @@ window.Conta = (() => {
     };
   }
 
+  // ------------------------------------------------------------ ligação com o banco ao abrir
+
+  /**
+   * Chamado uma vez pelo app.js. Deixa o banco pronto e acompanha a sessão: quando o
+   * Firebase diz quem entrou, o perfil local (e a tela) acompanham, e os RDOs trocam.
+   */
+  async function iniciar() {
+    if (!Nuvem.configurado()) return;
+    try {
+      Nuvem.aoMudar(async (user) => {
+        if (!user) {
+          if (sessao?.usuario?.id) { sessao = null; salvarSessao(); Store.usarConta(''); redesenhar(); }
+          return;
+        }
+        const perfil = await Nuvem.perfil({ recarregar: true }).catch(() => null);
+        if (!perfil) return;
+        const trocou = sessao?.usuario?.id !== perfil.id;
+        const mudou = JSON.stringify(sessao?.usuario || {}) !== JSON.stringify(perfil);
+        if (trocou || mudou) {
+          usarPerfil(perfil);
+          redesenhar();
+        }
+        sincronizar({ silencioso: true }).catch(() => {});
+      });
+    } catch { /* sem banco configurado: o portão mostra o aviso */ }
+  }
+
   return {
-    ativo, semConta, usuario, endereco, api,
-    entrar, cadastrar, esqueci, redefinir, sair,
-    enviarTudo, agendar, recuperar, definirEndereco,
+    iniciar, ativo, usuario, ehMestre,
+    entrar, cadastrar, esqueci, sair,
+    enviarTudo, sincronizar, agendar, recuperar, apagarNaNuvem,
+    abrirDoBanco,
     tela, ligarAssinatura,
     get sessao() { return sessao; },
   };

@@ -9,6 +9,22 @@ window.Store = (() => {
   const chave = () => (contaId ? `${KEY}:${contaId}` : KEY);
 
   /*
+   * Etapas do dia, na ordem do formulário "RDO ADM" do cliente (modelo de 09/11/2026).
+   * Só as horas mudam de um dia para o outro; os nomes são fixos.
+   */
+  const ETAPAS = [
+    'DSS:',
+    'VESTIÁRIO / TROCA DE ROUPA:',
+    'RECEBIMENTO DE OM, ASSINATURA DE DSS E EMOCIOGRAMA:',
+    'PREPARAÇÃO DE FERRAMENTAS, MATERIAIS E DOCUMENTAÇÕES DE SEGURANÇA',
+    'DESLOCAMENTO PARA O LOCAL DE TRABALHO:',
+    'PREENCHIMENTO DE DOCUMENTAÇÕES DE SEGURANÇA: ART, CHECK LIST DE FERRAMENTAS E EQUIPAMENTOS',
+    'INICIO DE EXECUÇÃO DA ATIVIDADE:',
+    'HORÁRIO DE ALMOÇO/JANTA',
+  ];
+  const etapasVazias = () => ETAPAS.map(() => ({ inicio: '', fim: '' }));
+
+  /*
    * Equipe fixa (pedido do usuário em 07/11/2026): aparece sempre para escolher na Mão de
    * Obra e não sai do cadastro. Ninguém entra no RDO sozinho: quem preenche marca os presentes.
    * Gente a mais fica em `employees`, no aparelho.
@@ -55,6 +71,20 @@ window.Store = (() => {
 
   let db = read();
 
+  /**
+   * Completa um RDO vindo do aparelho ou do banco com o que a versão antiga não tinha:
+   * etapas do dia sempre com as 8 linhas certas e os campos do cabeçalho como texto.
+   */
+  function completo(r) {
+    const x = { stoppages: [], ...r };
+    const guardadas = Array.isArray(x.etapas) ? x.etapas : [];
+    x.etapas = ETAPAS.map((_, i) => ({ inicio: '', fim: '', ...(guardadas[i] || {}) }));
+    for (const k of ['cliente', 'complexo', 'gerencia', 'equipeCoord', 'objeto', 'contractName', 'location', 'maintenanceType', 'shift', 'weather', 'startTime', 'endTime', 'supervisor', 'notes']) {
+      if (typeof x[k] !== 'string') x[k] = '';
+    }
+    return x;
+  }
+
   function read() {
     const base = seed();
     try {
@@ -68,7 +98,7 @@ window.Store = (() => {
         ...parsed,
         config,
         // RDO de versão anterior não tem horas paradas: começa com a lista vazia
-        rdos: Array.isArray(parsed.rdos) ? parsed.rdos.map((r) => ({ stoppages: [], ...limparRascunhoAntigo(r) })) : [],
+        rdos: Array.isArray(parsed.rdos) ? parsed.rdos.map((r) => completo(limparRascunhoAntigo(r))) : [],
         ultimos: parsed.ultimos && typeof parsed.ultimos === 'object' ? parsed.ultimos : {},
         employees: semExemplo(parsed.employees),
         equipment: semExemplo(parsed.equipment),
@@ -129,7 +159,13 @@ window.Store = (() => {
       status: 'draft',
       // só número e data saem sozinhos; o resto começa vazio e é digitado
       contractId: '',
-      contractName: '',
+      contractName: '',  // Contrato (nº), como no formulário do cliente
+      cliente: '',
+      complexo: '',
+      gerencia: '',
+      equipeCoord: '',  // EQUIPE / COORDENAÇÃO
+      objeto: '',
+      etapas: etapasVazias(),  // horas de início e fim de cada etapa do dia
       location: '',  // local / mina digitado à mão no cabeçalho
       maintenanceType: '',  // Preventiva, Corretiva ou Backlog (escolhido no cabeçalho)
       shift: '',
@@ -139,6 +175,7 @@ window.Store = (() => {
       supervisor: '',
       notes: '',
       createdAt: agora.toISOString(),
+      atualizado: Date.now(),  // quando mudou aqui: é o que decide quem vence na troca com o banco
       workforce: [],
       equipmentList: [],
       tasks: [],
@@ -172,6 +209,8 @@ window.Store = (() => {
     get rdos() { return db.rdos; },
 
     uid,
+    ETAPAS,
+    completo,
     todayIso,
     minutosParada,
     fmtHoras,
@@ -251,6 +290,8 @@ window.Store = (() => {
       marcarNumero(rdo.number);
       db.rdos = db.rdos.filter((r) => r.id !== id);
       window.Fotos?.remover(rdo.photos);
+      // apagado no aparelho, sai do banco na nuvem também (o dono ou a conta principal)
+      window.Conta?.apagarNaNuvem?.(rdo);
       return save();
     },
 
@@ -262,7 +303,7 @@ window.Store = (() => {
       const antes = { rdos: db.rdos.slice(), ultimos: { ...(db.ultimos || {}) } };
       const novos = (Array.isArray(rdos) ? rdos : [])
         .filter((r) => r && r.id && !db.rdos.some((x) => x.id === r.id))
-        .map((r) => ({ stoppages: [], ...r }));
+        .map((r) => completo({ atualizado: Date.now(), ...r }));
       db.rdos.push(...novos);
       db.rdos.sort((a, b) => String(b.number).localeCompare(String(a.number)));
       Object.entries(ultimos || {}).forEach(([dia, n]) => marcarNumero(`${dia}-${n}`));
@@ -331,18 +372,15 @@ window.Store = (() => {
       window.Fotos?.usarConta?.(contaId || '', { adotar: true });
     },
 
-    /** Endereço da central, guardado nas configurações (usado pelo Conta). */
-    setCentralUrl(url) {
-      db.config.centralUrl = String(url || '');
-      save();
-    },
-
     /** Salva alterações de um RDO; devolve false quando a cota estoura. */
     update(id, mutate) {
       const i = db.rdos.findIndex((r) => r.id === id);
       if (i < 0) return false;
       const antes = JSON.stringify(db.rdos[i]);
+      const carimbo = db.rdos[i].atualizado;
       mutate(db.rdos[i]);
+      // quem mexeu de verdade carimba a hora; quem só trouxe uma versão do banco mantém a dele
+      if (db.rdos[i].atualizado === carimbo) db.rdos[i].atualizado = Date.now();
       if (save()) return true;
       // cota estourou: desfaz também na memória. Antes a alteração ficava só na tela,
       // sumia ao reabrir e travava a gravação de tudo o que viesse depois.

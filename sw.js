@@ -3,12 +3,18 @@
  * Estratégia — rede primeiro para o HTML (pega versão nova quando há internet),
  * cache primeiro para os demais arquivos, que só mudam junto com uma versão.
  */
-const VERSAO = 'gps-rdo-v13';
+const VERSAO = 'gps-rdo-v16';
 const ESSENCIAIS = [
   './',
   'index.html',
   'styles.css',
   'manifest.webmanifest',
+  'js/firebase-config.js',
+  'js/nuvem.js',
+  'js/vendor/firebase-app-compat.js',
+  'js/vendor/firebase-auth-compat.js',
+  'js/vendor/firebase-firestore-compat.js',
+  'js/mestre.js',
   'js/store.js',
   'js/fotos.js',
   'js/ui.js',
