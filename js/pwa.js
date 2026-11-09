@@ -6,7 +6,13 @@ window.Pwa = (() => {
   'use strict';
 
   let convite = null;          // BeforeInstallPromptEvent (Android/Chrome)
+  let registro = null;         // registro do service worker (para procurar versão nova)
   const ouvintes = [];
+
+  // versão do código deste build; subir junto com o versionName do Gradle e com VERSAO do sw.js
+  const VERSAO_APP = '1.7';
+  const APK_URL = 'https://github.com/deividmarcio0610-tech/gps-rdo/releases/latest/download/GPS-RDO.apk';
+  const NATIVO = () => Boolean(window.Capacitor?.isNativePlatform?.());
 
   const instalado = () =>
     window.matchMedia('(display-mode: standalone)').matches ||
@@ -38,15 +44,35 @@ window.Pwa = (() => {
 
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('sw.js').then((reg) => {
-        // quando houver versão nova, ativa sem recarregar na cara do usuário
+        registro = reg;
+        // quando houver versão nova, assume e recarrega (o app não fica na versão velha)
         reg.addEventListener('updatefound', () => {
           const novo = reg.installing;
           novo?.addEventListener('statechange', () => {
-            if (novo.state === 'installed' && navigator.serviceWorker.controller) notificar();
+            if (novo.state !== 'installed') return;
+            if (navigator.serviceWorker.controller) novo.postMessage('ativar-agora');
+            notificar();
           });
         });
+        // confere agora e logo depois: o primeiro load pode pegar o sw.js em cache do CDN
+        checarAtualizacao();
+        setTimeout(checarAtualizacao, 60 * 1000);
       }).catch(() => { /* sem service worker o app ainda abre, só não fica offline */ });
     });
+
+    // versão nova publicada com o app aberto: confere ao voltar para ele, ao recuperar a
+    // rede e de tempos em tempos (antes só conferia ao carregar a página, uma vez)
+    const aoVoltar = () => { if (document.visibilityState === 'visible') checarAtualizacao(); };
+    document.addEventListener('visibilitychange', aoVoltar);
+    window.addEventListener('focus', checarAtualizacao);
+    window.addEventListener('online', checarAtualizacao);
+    setInterval(checarAtualizacao, 5 * 60 * 1000);
+  }
+
+  /** Pede ao navegador para reler o sw.js; havendo versão nova, ela entra e a página recarrega. */
+  function checarAtualizacao() {
+    if (!registro || !navigator.onLine) return Promise.resolve(false);
+    return registro.update().then(() => true).catch(() => false);
   }
 
   function escutarConvite() {
@@ -81,5 +107,28 @@ window.Pwa = (() => {
 
   const aoMudar = (f) => { ouvintes.push(f); };
 
-  return { registrar, escutarConvite, podeInstalar, instalar, aoMudar, instalado, ehIOS, ehAndroid };
+  /**
+   * No APK não há atualização silenciosa: o Android só instala outro APK com confirmação.
+   * Aqui só se descobre se a release publicada é mais nova que este build, para avisar.
+   */
+  async function versaoNovaDoApk() {
+    if (!NATIVO() || !navigator.onLine) return null;
+    try {
+      const r = await fetch('https://api.github.com/repos/deividmarcio0610-tech/gps-rdo/releases/latest', { cache: 'no-store' });
+      if (!r.ok) return null;
+      const tag = String((await r.json()).tag_name || '').replace(/^v/i, '');
+      if (!tag) return null;
+      const numero = (v) => String(v).split('.').map((n) => Number(n) || 0);
+      const [a, b] = [numero(tag), numero(VERSAO_APP)];
+      for (let i = 0; i < Math.max(a.length, b.length); i += 1) {
+        if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0) ? { versao: tag, url: APK_URL } : null;
+      }
+      return null;
+    } catch { return null; }
+  }
+
+  return {
+    registrar, escutarConvite, podeInstalar, instalar, aoMudar, instalado, ehIOS, ehAndroid,
+    checarAtualizacao, versao: () => VERSAO_APP, apkUrl: APK_URL, versaoNovaDoApk,
+  };
 })();

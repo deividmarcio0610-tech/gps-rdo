@@ -484,6 +484,8 @@ window.Conta = (() => {
       <form data-form="criar">
         <div class="field"><label for="n-nome">Nome completo</label>
           <input id="n-nome" type="text" autocomplete="name" required placeholder="Como assina os RDOs"></div>
+        <div class="field"><label for="n-funcao">Função</label>
+          <input id="n-funcao" type="text" required placeholder="Ex.: Mecânico, Eletricista, Supervisor"></div>
         <div class="field"><label for="n-email">E-mail</label>
           <input id="n-email" type="email" autocomplete="email" autocapitalize="off" required></div>
         <div class="field"><label for="n-senha">Senha (mínimo 6)</label>
@@ -493,6 +495,14 @@ window.Conta = (() => {
           <canvas data-assina data-vazia="1" class="assina" aria-label="Desenhe sua assinatura"></canvas>
           <button type="button" class="btn ghost block" data-act="limpar-assina">${icon('trash', 15)}Limpar assinatura</button>
           <p class="dica">Assine dentro do quadro, como no papel. A assinatura vai junto com os seus RDOs.</p>
+        </div>
+        <div class="field">
+          <label>Foto do rosto</label>
+          <input id="n-facial" type="file" accept="image/*" capture="user" hidden>
+          <button type="button" class="btn ghost block" data-act="facial">${icon('camera', 16)}Tirar a foto do rosto</button>
+          <img class="rosto-img" data-facial-preview hidden alt="Foto do rosto">
+          <p class="dica">A foto identifica quem preencheu o RDO. Fica guardada só na sua conta e na conta principal;
+            não vai no PDF nem no WhatsApp.</p>
         </div>
         <button class="btn primary block" type="submit">Criar minha conta</button>
       </form>`;
@@ -514,13 +524,22 @@ window.Conta = (() => {
     return `
       <div class="card"><div class="body">
         <div class="name">${esc(u.nome || 'Sua conta')}</div>
-        <div class="sub">${esc(u.email || '')}${u.mestre ? ' · conta principal' : ''}</div>
+        <div class="sub">${esc(u.funcao ? `${u.funcao} · ` : '')}${esc(u.email || '')}${u.mestre ? ' · conta principal' : ''}</div>
       </div></div>
+      ${u.deveTrocarSenha ? `<div class="conta-topo">${icon('lock', 18)}<span>Você entrou com a senha provisória.
+        Troque a senha agora em “Trocar a senha”; ela é pessoal e não deve ficar com outra pessoa.</span></div>` : ''}
       <div class="sub" data-sync>${esc(textoStatus())}</div>
+      <div class="sub">Versão ${esc(Pwa.versao?.() || '—')}</div>
+      <div data-atualizacao hidden></div>
+      ${u.facial ? `<div class="field"><label>Foto do rosto</label><img class="rosto-img" src="${esc(u.facial)}" alt="Foto do rosto"></div>` : ''}
       ${u.assinatura ? `<div class="field"><label>Sua assinatura</label><img class="assina-img" src="${esc(u.assinatura)}" alt="Assinatura"></div>` : ''}
       <button class="btn primary block" data-act="enviar">${icon('upload', 16)}Enviar meus RDOs agora</button>
       <button class="btn ghost block" data-act="recuperar">${icon('download', 16)}Trazer os RDOs do banco</button>
+      <button class="btn ghost block" data-act="atualizar">${icon('download', 16)}Procurar atualização do app</button>
+      <button class="btn ghost block" data-act="recuperar-senha">${icon('mail', 16)}Recuperar a senha por e-mail</button>
       <button class="btn ghost block" data-act="senha">${icon('lock', 16)}Trocar a senha</button>
+      <button class="btn ghost block" data-act="foto-rosto">${icon('camera', 16)}${u.facial ? 'Trocar a foto do rosto' : 'Tirar a foto do rosto'}</button>
+      <input type="file" accept="image/*" capture="user" data-entrada-rosto hidden>
       <button class="btn ghost block" data-act="nova-assinatura">${icon('file', 16)}Desenhar a assinatura de novo</button>
       <button class="btn danger block" data-act="sair">Sair da conta</button>
       <p class="dica">Os RDOs desta conta ficam no aparelho e no banco na nuvem. Ao sair, nada é apagado:
@@ -569,13 +588,16 @@ window.Conta = (() => {
           aviso = '';
           const assina = root.__assina;
           if (assina?.vazia()) { mostrarAviso('Desenhe sua assinatura no quadro antes de criar a conta.'); redesenhar(); return; }
+          if (!root.__facial) { mostrarAviso('Tire a foto do rosto antes de criar a conta.'); redesenhar(); return; }
           ocupado(ev.submitter, true);
           try {
             await cadastrar({
               nome: root.querySelector('#n-nome').value,
+              funcao: root.querySelector('#n-funcao').value,
               email: root.querySelector('#n-email').value.trim(),
               senha: root.querySelector('#n-senha').value,
               assinatura: assina.png(),
+              facial: root.__facial,
             });
             toast('Conta criada. Seus RDOs já podem ir para o banco.');
             irParaInicio();
@@ -598,6 +620,26 @@ window.Conta = (() => {
         root.querySelector('[data-act="limpar-assina"]')?.addEventListener('click', () => root.__assina?.limpar());
         root.__assina = ligarAssinatura(root);
 
+        // foto do rosto no cadastro: câmera da frente, reduzida antes de guardar
+        const entradaFacial = root.querySelector('#n-facial');
+        const botaoFacial = root.querySelector('[data-act="facial"]');
+        botaoFacial?.addEventListener('click', () => entradaFacial?.click());
+        entradaFacial?.addEventListener('change', async () => {
+          const arquivo = entradaFacial.files?.[0];
+          if (!arquivo) return;
+          botaoFacial.disabled = true;
+          try {
+            root.__facial = await Fotos.reduzir(arquivo, { lado: 480, qualidade: 0.75 });
+            const previa = root.querySelector('[data-facial-preview]');
+            previa.src = root.__facial;
+            previa.hidden = false;
+            botaoFacial.textContent = 'Trocar a foto do rosto';
+          } catch {
+            mostrarAviso('Não consegui usar esta foto. Tire outra com a câmera.', 'erro');
+            redesenhar();
+          } finally { botaoFacial.disabled = false; }
+        });
+
         // ---- conta aberta pelo menu
         root.querySelector('[data-act="enviar"]')?.addEventListener('click', async (ev) => {
           ocupado(ev.currentTarget, true);
@@ -615,19 +657,69 @@ window.Conta = (() => {
           if (r.recebidos) redesenhar();
         });
 
+        root.querySelector('[data-act="atualizar"]')?.addEventListener('click', async (ev) => {
+          ocupado(ev.currentTarget, true);
+          const achou = await Pwa.checarAtualizacao?.();
+          ocupado(ev.currentTarget, false);
+          if (achou) toast('Procurando versão nova; se houver, o app se atualiza sozinho.');
+          else toast('Não consegui conferir agora. Tente com internet.');
+        });
+
+        // APK não se atualiza sozinho: avisa quando a release publicada é mais nova
+        Pwa.versaoNovaDoApk?.().then((nova) => {
+          if (!nova) return;
+          const box = root.querySelector('[data-atualizacao]');
+          if (!box) return;
+          box.hidden = false;
+          box.innerHTML = `<button class="btn primary block" data-act="baixar-apk">${icon('download', 16)}Baixar a versão ${esc(nova.versao)} do app</button>`;
+          box.querySelector('[data-act="baixar-apk"]')?.addEventListener('click', () => {
+            window.open(nova.url, '_system');
+          });
+        }).catch(() => {});
+
+        root.querySelector('[data-act="recuperar-senha"]')?.addEventListener('click', async (ev) => {
+          const conta = usuario();
+          if (!conta?.email) return;
+          ocupado(ev.currentTarget, true);
+          try {
+            await esqueci(conta.email);
+            toast('Link de senha nova enviado para o seu e-mail.');
+          } catch (e) { toast(e.message); }
+          finally { ocupado(ev.currentTarget, false); }
+        });
+
         root.querySelector('[data-act="senha"]')?.addEventListener('click', async () => {
           const v = await sheet({
             title: 'Trocar a senha',
             fields: [
               { key: 'atual', label: 'Senha atual', type: 'password' },
               { key: 'nova', label: 'Senha nova (mínimo 6)', type: 'password' },
+              { key: 'repete', label: 'Repita a senha nova', type: 'password' },
             ],
             submit: 'Trocar',
           });
           if (!v) return;
+          if (String(v.nova || '').length < 6) { toast('A senha nova precisa de pelo menos 6 caracteres.'); return; }
+          if (v.nova !== v.repete) { toast('As duas senhas novas não são iguais.'); return; }
           try {
-            await Nuvem.trocarSenha(v.atual, v.nova);
+            const perfil = await Nuvem.trocarSenha(v.atual, v.nova).then(() => Nuvem.perfil({ recarregar: true }));
+            if (sessao && perfil) { sessao.usuario = perfil; salvarSessao(); }
             toast('Senha trocada.');
+            redesenhar();
+          } catch (e) { toast(e.message); }
+        });
+
+        const entradaRosto = root.querySelector('[data-entrada-rosto]');
+        root.querySelector('[data-act="foto-rosto"]')?.addEventListener('click', () => entradaRosto?.click());
+        entradaRosto?.addEventListener('change', async () => {
+          const arquivo = entradaRosto.files?.[0];
+          if (!arquivo) return;
+          try {
+            const facial = await Fotos.reduzir(arquivo, { lado: 480, qualidade: 0.75 });
+            const perfil = await Nuvem.salvarPerfil({ facial });
+            if (sessao) { sessao.usuario = perfil; salvarSessao(); }
+            toast('Foto do rosto guardada.');
+            redesenhar();
           } catch (e) { toast(e.message); }
         });
 

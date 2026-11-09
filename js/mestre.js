@@ -116,9 +116,12 @@ window.Mestre = (() => {
     return `
       <div class="card"><div class="body">
         <div class="name">${icon('file', 16)} ${esc(pronto.nome)}</div>
-        <div class="sub">${pronto.quantos} RDO(s) · ${kb(pronto.blob.size)} · pronto para baixar</div>
+        <div class="sub">${pronto.quantos} RDO(s) · ${kb(pronto.blob.size)} · PDF pronto</div>
       </div></div>
-      <button class="btn primary block" data-act="baixar-pdf">${icon('download', 18)}<span>Baixar / compartilhar o PDF</span></button>`;
+      <button class="btn primary block" data-act="baixar-pdf">${icon('download', 18)}<span>Baixar PDF para o telefone</span></button>
+      <button class="btn block" data-act="email-pdf">${icon('mail', 18)}<span>Enviar por e-mail</span></button>
+      <button class="btn block" data-act="zap-pdf" style="background:#25D366;color:#fff">${icon('whatsapp', 18)}<span>Enviar pelo WhatsApp</span></button>
+      <p class="dica">E-mail e WhatsApp abrem o compartilhar do aparelho com o PDF anexado. No computador sem compartilhar, o PDF é baixado e você anexa à mão.</p>`;
   }
 
   function tela(app) {
@@ -188,13 +191,71 @@ window.Mestre = (() => {
 
         root.querySelector('[data-act="gerar"]')?.addEventListener('click', () => gerar(app));
 
-        root.querySelector('[data-act="baixar-pdf"]')?.addEventListener('click', async () => {
+        const tituloPdf = modo === 'dia' ? `RDO ${fmtDate(dia)}` : `RDOs de ${fmtDate(de)} a ${fmtDate(ate)}`;
+
+        root.querySelector('[data-act="baixar-pdf"]')?.addEventListener('click', async (ev) => {
           if (!pronto) return;
-          const res = await UI.entregarArquivo(pronto.blob, pronto.nome, 'Salvar ou enviar o PDF')
-            .catch(() => 'erro');
-          if (res === 'baixado') toast('PDF baixado.');
-          if (res === 'compartilhado') toast('PDF entregue para o compartilhar.');
-          if (res === 'erro') toast('Não foi possível entregar o arquivo.');
+          const btn = ev.currentTarget;
+          btn.disabled = true;
+          try {
+            const nativo = window.Capacitor?.isNativePlatform?.() ? window.Capacitor.Plugins : null;
+            if (nativo?.Filesystem) {
+              try {
+                await nativo.Filesystem.writeFile({
+                  path: pronto.nome,
+                  data: await UI.blobParaBase64(pronto.blob),
+                  directory: 'DOCUMENTS',
+                });
+                toast(`PDF salvo em Documentos: ${pronto.nome}`);
+                return;
+              } catch {
+                // sem acesso a Documentos: cai no compartilhar para salvar
+              }
+            }
+            if (nativo?.Share) {
+              const res = await UI.entregarArquivo(pronto.blob, pronto.nome, 'Salvar o PDF no telefone');
+              if (res === 'compartilhado') toast('Escolha onde salvar o PDF.');
+              return;
+            }
+            UI.baixar(pronto.blob, pronto.nome);
+            toast('PDF baixado. No iPhone, use Compartilhar > Salvar em Arquivos.');
+          } catch {
+            toast('Não foi possível salvar o PDF.');
+          } finally {
+            btn.disabled = false;
+          }
+        });
+
+        // O PDF já está montado: o compartilhar abre dentro do toque e leva o arquivo anexado.
+        const compartilharPdf = async (titulo) => {
+          if (!pronto) return;
+          const res = await UI.entregarArquivo(pronto.blob, pronto.nome, titulo).catch(() => 'erro');
+          if (res === 'compartilhado') return 'compartilhado';
+          if (res === 'baixado') return 'baixado';
+          if (res === 'erro') toast('Não foi possível abrir o compartilhar.');
+          return res;
+        };
+
+        root.querySelector('[data-act="email-pdf"]')?.addEventListener('click', async () => {
+          if (!pronto) return;
+          const res = await compartilharPdf('Enviar por e-mail');
+          if (res === 'compartilhado') {
+            toast('Escolha o aplicativo de e-mail: o PDF vai anexado.');
+            return;
+          }
+          if (res === 'baixado') {
+            const assunto = encodeURIComponent(`${tituloPdf} - ${pronto.nome}`);
+            const corpo = encodeURIComponent(`Segue o ${tituloPdf} em PDF (${pronto.quantos} RDO(s)).\nO arquivo ${pronto.nome} foi baixado neste aparelho; anexe-o ao e-mail.`);
+            window.location.href = `mailto:?subject=${assunto}&body=${corpo}`;
+            toast('PDF baixado. Anexe o arquivo no e-mail: este navegador não anexa sozinho.');
+          }
+        });
+
+        root.querySelector('[data-act="zap-pdf"]')?.addEventListener('click', async () => {
+          if (!pronto) return;
+          const res = await compartilharPdf('Enviar pelo WhatsApp');
+          if (res === 'compartilhado') toast('Escolha o WhatsApp: o PDF vai anexado.');
+          if (res === 'baixado') toast('PDF baixado. Este navegador não anexa sozinho: anexe o arquivo na conversa do WhatsApp.');
         });
       },
     };

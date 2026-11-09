@@ -152,7 +152,7 @@ window.Pdf = (() => {
     ]);
     section('RELATÓRIO DIÁRIO DE OBRA');
     section('Dados Contrato / Dados da Atividade');
-    [['Contrato:', rdo.contractName], ['Cliente:', rdo.cliente], ['DATA', fmtDate(rdo.date)],
+    [['Cliente:', rdo.cliente], ['DATA', fmtDate(rdo.date)],
       ['Complexo', rdo.complexo], ['Gerência:', rdo.gerencia], ['EQUIPE/ COORDENAÇÃO:', rdo.equipeCoord],
       ['Objeto:', rdo.objeto], ['Local / Mina / Turno', [rdo.location, rdo.shift].filter(Boolean).join(' — ')],
       ['Supervisor In Haus:', rdo.supervisor]].forEach(v => row(...v));
@@ -243,7 +243,47 @@ window.Pdf = (() => {
         body: fotos.map((p, i) => [`Foto ${i + 1}`, [p.date && fmtDate(p.date), p.time,
           p.latitude != null && p.longitude != null ? `GPS ${Number(p.latitude).toFixed(6)}, ${Number(p.longitude).toFixed(6)}` : '', p.desc].filter(Boolean).join(' — ')]),
         theme: 'grid', styles: { fontSize: 8, cellPadding: PAD, overflow: 'linebreak' }, columnStyles: { 0: { cellWidth: 22 } } });
+      y = doc.lastAutoTable.finalY;
     }
+
+    // Assinatura do formulário: a foto do rosto do cadastro de quem lançou, congelada no RDO.
+    const autor = rdo.autor || null;
+    const caixaL = 30;
+    const caixaA = 26;
+    const blocoA = 6.4 + caixaA + 2;
+    if (y + blocoA > fim) { doc.addPage(); y = 18; }
+    celula(doc, margem, y, larg - margem * 2, 6.4, 'ASSINATURA', rotulo);
+    y += 6.4;
+    doc.setFillColor(...CINZA);
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.18);
+    doc.rect(margem, y, caixaL, caixaA, 'FD');
+    if (autor?.foto) {
+      try {
+        const props = doc.getImageProperties(autor.foto);
+        const escala = Math.min(caixaL / props.width, caixaA / props.height);
+        const w = props.width * escala;
+        const h = props.height * escala;
+        doc.addImage(autor.foto, props.fileType || 'JPEG', margem + (caixaL - w) / 2, y + (caixaA - h) / 2, w, h);
+      } catch {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor(120, 120, 120);
+        doc.text('Foto indisponível', margem + caixaL / 2, y + caixaA / 2, { align: 'center' });
+      }
+    }
+    const txAutor = margem + caixaL + 4;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(...TINTA);
+    doc.text(String(autor?.nome || ''), txAutor, y + 8);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.text(String(autor?.funcao || ''), txAutor, y + 14);
+    doc.setFontSize(7);
+    doc.setTextColor(90, 90, 90);
+    doc.text('Assinatura de quem preencheu o RDO', txAutor, y + 21);
+    y += caixaA + 2;
   }
 
   /** Monta o PDF de um RDO (com as fotos) e devolve o documento e o nome do arquivo. */

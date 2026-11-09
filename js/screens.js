@@ -205,10 +205,6 @@ window.Screens = (() => {
             <input id="h-date" type="date" value="${esc(rdo.date)}" data-key="date">
           </div>
           <div class="field">
-            <label for="h-contrato">Contrato</label>
-            <input id="h-contrato" type="text" value="${esc(rdo.contractName || '')}" data-key="contractName" placeholder="Nº do contrato" autocomplete="off" maxlength="60">
-          </div>
-          <div class="field">
             <label for="h-cliente">Cliente</label>
             <input id="h-cliente" type="text" value="${esc(rdo.cliente || '')}" data-key="cliente" placeholder="Ex.: VALE/MARIANA" autocomplete="off" maxlength="60">
           </div>
@@ -277,9 +273,7 @@ window.Screens = (() => {
                 renumerado = d.number;
               }
             }
-            // contrato, cliente e objeto: o cabeçalho do formulário "RDO ADM" do cliente
-            d.contractId = '';
-            d.contractName = ler('contractName').value.trim();
+            // cliente e objeto: o cabeçalho do formulário "RDO ADM" do cliente
             d.cliente = ler('cliente').value.trim();
             d.complexo = ler('complexo').value.trim();
             d.gerencia = ler('gerencia').value.trim();
@@ -508,7 +502,6 @@ window.Screens = (() => {
     // mesma folha para adicionar e para corrigir (toque no nome); horímetro em branco
     const campos = (e = {}) => [
       { key: 'name', label: 'Equipamento', placeholder: 'Nome do equipamento', value: e.name },
-      { key: 'code', label: 'Código / patrimônio', placeholder: 'Código', value: e.code },
       { key: 'status', label: 'Status', type: 'select', options: [{ value: '', label: 'Selecione' }, 'Operando', 'Parado', 'Manutenção'], value: e.status },
       { key: 'hoursStart', label: 'Horímetro inicial', type: 'number', placeholder: 'Horímetro inicial', value: e.hoursStart ?? '' },
       { key: 'hoursEnd', label: 'Horímetro final', type: 'number', placeholder: 'Horímetro final', value: e.hoursEnd ?? '' },
@@ -519,7 +512,6 @@ window.Screens = (() => {
       if (!valores.status) { toast('Informe o status do equipamento.'); return null; }
       return {
         name: valores.name,
-        code: valores.code || '',
         status: valores.status,
         hoursStart: horimetro(valores.hoursStart),
         hoursEnd: horimetro(valores.hoursEnd),
@@ -536,7 +528,7 @@ window.Screens = (() => {
             <div class="card">
               <button class="body editar" data-editar="${i}"${trava ? ' disabled' : ''}>
                 <div class="name">${esc(e.name)}</div>
-                <div class="sub">${esc(e.code || 'sem código')} · horímetro ${horas(e.hoursStart)} → ${horas(e.hoursEnd)}</div>
+                <div class="sub">horímetro ${horas(e.hoursStart)} → ${horas(e.hoursEnd)}</div>
               </button>
               <span class="badge ${badge(e.status)}">${esc(e.status)}</span>
               ${trava ? '' : `<button class="del" data-del="${i}" aria-label="Remover">${icon('trash', 17)}</button>`}
@@ -568,14 +560,14 @@ window.Screens = (() => {
         root.querySelector('[data-act="copiar-anterior"]')?.addEventListener('click', async (e) => {
           const origem = Store.find(e.currentTarget.dataset.de);
           if (!origem) return;
-          const ja = new Set(rdo.equipmentList.map((x) => `${x.name}|${x.code}`.toLowerCase()));
-          const novos = origem.equipmentList.filter((x) => !ja.has(`${x.name}|${x.code}`.toLowerCase()));
+          const ja = new Set(rdo.equipmentList.map((x) => x.name.toLowerCase()));
+          const novos = origem.equipmentList.filter((x) => !ja.has(x.name.toLowerCase()));
           if (!novos.length) { toast('Esses equipamentos já estão no RDO.'); return; }
           const ok = await confirmar('Copiar equipamentos',
             `Copiar ${novos.length} equipamento(s) do RDO ${origem.number} (${fmtDate(origem.date)})? O horímetro fica em branco para você digitar.`, 'Copiar');
           if (!ok) return;
           Store.update(rdo.id, (d) => {
-            novos.forEach((x) => d.equipmentList.push({ name: x.name, code: x.code || '', status: x.status, hoursStart: null, hoursEnd: null }));
+            novos.forEach((x) => d.equipmentList.push({ name: x.name, status: x.status, hoursStart: null, hoursEnd: null }));
           });
           toast(`${novos.length} equipamento(s) copiado(s).`);
           app.render();

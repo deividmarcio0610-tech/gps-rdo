@@ -84,7 +84,7 @@ window.Nuvem = (() => {
   const docRdo = (docId) => db.collection('rdos').doc(docId);
   const idDoc = (dono, rdoId) => `${dono}__${rdoId}`;
 
-  /** Perfil da conta (nome, e-mail, assinatura, se é a conta principal). */
+  /** Perfil da conta (nome, função, e-mail, assinatura, foto do rosto, se é a conta principal). */
   async function perfil({ recarregar = false } = {}) {
     await iniciar();
     const u = atual();
@@ -97,20 +97,27 @@ window.Nuvem = (() => {
       id: u.uid,
       email,
       nome: dados.nome || u.displayName || email,
+      funcao: dados.funcao || '',
       assinatura: dados.assinatura || '',
+      facial: dados.facial || '',
+      deveTrocarSenha: dados.deveTrocarSenha === true,
+      // conta principal só pelo e-mail confirmado do supervisor; nada que o cadastro mande vale
       mestre: u.emailVerified === true && email === MESTRE,
     };
     return perfilCache;
   }
 
-  async function cadastrar({ nome, email, senha, assinatura }) {
+  async function cadastrar({ nome, email, senha, assinatura, funcao, facial }) {
     await iniciar();
     const limpo = String(email || '').trim().toLowerCase();
     const cred = await auth.createUserWithEmailAndPassword(limpo, senha).catch((e) => { throw falha(e); });
+    // os campos vêm um por um de propósito: um "mestre" mandado de fora nunca chega ao documento
     const perfilNovo = {
       nome: String(nome || '').trim(),
+      funcao: String(funcao || '').trim(),
       email: limpo,
       assinatura: assinatura || '',
+      facial: facial || '',
       mestre: limpo === MESTRE && cred.user.emailVerified === true,
       criado: Date.now(),
     };
@@ -131,7 +138,10 @@ window.Nuvem = (() => {
       id: cred.user.uid,
       email: String(cred.user.email || email).toLowerCase(),
       nome: cred.user.displayName || email,
+      funcao: '',
       assinatura: '',
+      facial: '',
+      deveTrocarSenha: false,
       mestre: cred.user.emailVerified === true && String(cred.user.email || '').toLowerCase() === MESTRE,
     }));
   }
@@ -156,6 +166,11 @@ window.Nuvem = (() => {
     const credencial = window.firebase.auth.EmailAuthProvider.credential(u.email, atualSenha);
     await u.reauthenticateWithCredential(credencial).catch((e) => { throw falha(e); });
     await u.updatePassword(nova).catch((e) => { throw falha(e); });
+    // senha trocada: some o aviso de senha provisória (só existe para a conta principal)
+    if (perfilCache?.deveTrocarSenha) {
+      await docUsuario(u.uid).set({ deveTrocarSenha: false }, { merge: true }).catch(() => {});
+      perfilCache = null;
+    }
   }
 
   async function salvarPerfil(campos) {

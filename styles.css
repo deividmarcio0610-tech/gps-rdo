@@ -879,6 +879,14 @@ footer.brand .rdo { color: var(--blue); }
   padding: 4px;
 }
 
+.rosto-img {
+  max-width: 100%;
+  max-height: 160px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
 .central-end { margin-top: 16px; }
 .central-end summary {
   font-size: 12px;

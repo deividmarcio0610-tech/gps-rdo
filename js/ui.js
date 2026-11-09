@@ -15,6 +15,7 @@ window.UI = (() => {
     mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
     text: '<path d="M4 7V5h16v2M9 19h6M12 5v14"/>',
     lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+    mail: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m2 7 10 6 10-6"/>',
     unlock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.8-1.3"/>',
     shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/>',
     upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5M12 3v12"/>',
@@ -316,5 +317,5 @@ window.UI = (() => {
     });
   }
 
-  return { icon, esc, fmtDate, fmtTime, nowTime, toast, sheet, confirmar, fecharFolhas, entregarArquivo, botaoArquivo, ligarDitado };
+  return { icon, esc, fmtDate, fmtTime, nowTime, toast, sheet, confirmar, fecharFolhas, baixar, blobParaBase64, entregarArquivo, botaoArquivo, ligarDitado };
 })();

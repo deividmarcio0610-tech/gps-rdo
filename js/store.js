@@ -229,9 +229,22 @@ window.Store = (() => {
       save();
     },
 
-    /** Cria um RDO já persistido (usado só pelo botão Novo RDO). */
+    /**
+     * Cria um RDO já persistido (botão Novo RDO). A assinatura do formulário é a foto do
+     * rosto da conta que preenche (cadastro): vai congelada no RDO, para o PDF e o
+     * supervisor verem quem lançou.
+     */
     createRdo() {
       const rdo = emptyRdo();
+      const conta = window.Conta?.usuario?.() || null;
+      if (conta) {
+        rdo.autor = {
+          nome: conta.nome || '',
+          funcao: conta.funcao || '',
+          email: conta.email || '',
+          foto: conta.facial || '',
+        };
+      }
       marcarNumero(rdo.number);
       db.rdos.unshift(rdo);
       save();
