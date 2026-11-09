@@ -24,8 +24,14 @@ window.Mestre = (() => {
   let gerando = false;
   let avisoGerar = '';
   // "Editar antes de gerar": TST e supervisor entram de segunda a sexta e podem sair num dia
-  // em que eles não foram. Vale só para o próximo PDF e fica neste aparelho.
-  let editar = { tst: true, supervisor: true, nome: 'Tiago' };
+  // em que eles não foram. O ajuste é guardado por dia (AAAA-MM-DD), no aparelho; o dia sem
+  // ajuste usa o padrão (os dois ligados, supervisor "Tiago"). Vale para o próximo PDF.
+  const AJUSTE_PADRAO = { tst: true, tstNome: '', supervisor: true, nome: 'Tiago' };
+  const editar = { dias: {} };
+  let painelDia = hoje();
+
+  const ajusteDoDia = (d) => ({ ...AJUSTE_PADRAO, ...(editar.dias[d] || {}) });
+  const guardarAjuste = (d, parcial) => { editar.dias[d] = { ...ajusteDoDia(d), ...parcial }; };
 
   const intervalo = () => (modo === 'dia' ? { de: dia, ate: dia } : { de, ate });
   const chaveDe = () => {
@@ -112,12 +118,17 @@ window.Mestre = (() => {
       const titulo = modo === 'dia' ? `RDO ${fmtDate(dia)}` : `RDOs de ${fmtDate(de)} a ${fmtDate(ate)}`;
       // dia com vários RDOs não repete folha: junta as atividades e a equipe num só relatório
       const paraPdfFinal = modo === 'dia' && rdos.length > 1 ? [juntarDoDia(rdos, dia)] : rdos;
-      const ajustados = paraPdfFinal.map((r) => ({
-        ...r,
-        semTstPadrao: !editar.tst,
-        semSupervisorPadrao: !editar.supervisor,
-        supervisor: editar.supervisor ? (String(r.supervisor || '').trim() || editar.nome) : String(r.supervisor || '').trim(),
-      }));
+      const ajustados = paraPdfFinal.map((r) => {
+        // cada folha usa o ajuste do dia dela (importa no PDF por período)
+        const a = ajusteDoDia(r.date);
+        return {
+          ...r,
+          semTstPadrao: !a.tst,
+          semSupervisorPadrao: !a.supervisor,
+          supervisor: a.supervisor ? (String(r.supervisor || '').trim() || a.nome) : '',
+          tst: a.tst ? (String(r.tst || '').trim() || a.tstNome) : '',
+        };
+      });
       const { doc } = await Pdf.montarVarios(ajustados, { nome, titulo });
       pronto = { nome, blob: doc.output('blob'), quantos: rdos.length };
       toast(`PDF pronto: ${rdos.length} RDO(s).`);
@@ -191,15 +202,19 @@ window.Mestre = (() => {
 
         <div class="card"><div class="body" style="display:grid;gap:8px">
           <div class="name">${icon('text', 16)} Editar antes de gerar</div>
+          <div class="field"><label for="e-painel-dia">Dia do ajuste</label>
+            <input id="e-painel-dia" type="date" value="${esc(painelDia)}"></div>
           <label style="display:flex;align-items:center;gap:8px;font-size:13px">
-            <input type="checkbox" data-op="tst"${editar.tst ? ' checked' : ''}> Técnico de Segurança (seg a sex)
+            <input type="checkbox" data-op="tst"${ajusteDoDia(painelDia).tst ? ' checked' : ''}> Técnico de Segurança neste dia
           </label>
+          <div class="field"><label for="e-tst">Nome do técnico de segurança</label>
+            <input id="e-tst" type="text" value="${esc(ajusteDoDia(painelDia).tstNome)}" placeholder="Em branco: usa o nome do RDO"${ajusteDoDia(painelDia).tst ? '' : ' disabled'}></div>
           <label style="display:flex;align-items:center;gap:8px;font-size:13px">
-            <input type="checkbox" data-op="supervisor"${editar.supervisor ? ' checked' : ''}> Supervisor (seg a sex)
+            <input type="checkbox" data-op="supervisor"${ajusteDoDia(painelDia).supervisor ? ' checked' : ''}> Supervisor neste dia
           </label>
           <div class="field"><label for="e-supervisor">Nome do supervisor</label>
-            <input id="e-supervisor" type="text" value="${esc(editar.nome)}"${editar.supervisor ? '' : ' disabled'}></div>
-          <p class="dica">Desligue o TST ou o supervisor no dia em que eles não foram.</p>
+            <input id="e-supervisor" type="text" value="${esc(ajusteDoDia(painelDia).nome)}"${ajusteDoDia(painelDia).supervisor ? '' : ' disabled'}></div>
+          <p class="dica">Escolha o dia e deixe marcado só o que teve naquele dia. O ajuste fica guardado por dia.</p>
         </div></div>
 
         <button class="btn primary block" data-act="gerar"${cache.lista.length && !gerando ? '' : ' disabled'}>
@@ -210,12 +225,15 @@ window.Mestre = (() => {
       bind(root) {
         root.querySelectorAll('[data-modo]').forEach((b) => b.addEventListener('click', () => {
           modo = b.dataset.modo;
+          // o painel de ajuste começa no dia escolhido (ou no primeiro do período)
+          painelDia = modo === 'dia' ? dia : (painelDia >= de && painelDia <= ate ? painelDia : de);
           pronto = null;
           app.render();
         }));
         root.querySelector('#e-dia')?.addEventListener('change', (e) => {
           if (!e.target.value) return;
           dia = e.target.value;
+          painelDia = dia;
           pronto = null;
           app.render();
         });
@@ -246,13 +264,24 @@ window.Mestre = (() => {
           b.disabled = false;
         }));
 
+        root.querySelector('#e-painel-dia')?.addEventListener('change', (e) => {
+          if (!e.target.value) return;
+          painelDia = e.target.value;
+          pronto = null;
+          app.render();
+        });
         root.querySelectorAll('[data-op]').forEach((b) => b.addEventListener('change', () => {
-          editar[b.dataset.op] = b.checked;
+          guardarAjuste(painelDia, { [b.dataset.op]: b.checked });
           pronto = null;
           app.render();
         }));
+        root.querySelector('#e-tst')?.addEventListener('change', (e) => {
+          guardarAjuste(painelDia, { tstNome: String(e.target.value || '').trim() });
+          pronto = null;
+          app.render();
+        });
         root.querySelector('#e-supervisor')?.addEventListener('change', (e) => {
-          editar.nome = String(e.target.value || '').trim() || 'Tiago';
+          guardarAjuste(painelDia, { nome: String(e.target.value || '').trim() || 'Tiago' });
           pronto = null;
           app.render();
         });

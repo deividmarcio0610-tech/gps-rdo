@@ -79,7 +79,7 @@ window.Store = (() => {
     const x = { stoppages: [], ...r };
     const guardadas = Array.isArray(x.etapas) ? x.etapas : [];
     x.etapas = ETAPAS.map((_, i) => ({ inicio: '', fim: '', ...(guardadas[i] || {}) }));
-    for (const k of ['cliente', 'complexo', 'gerencia', 'equipeCoord', 'objeto', 'contractName', 'location', 'maintenanceType', 'shift', 'weather', 'startTime', 'endTime', 'supervisor', 'notes']) {
+    for (const k of ['cliente', 'complexo', 'gerencia', 'equipeCoord', 'objeto', 'contractName', 'location', 'maintenanceType', 'shift', 'weather', 'startTime', 'endTime', 'supervisor', 'tst', 'notes']) {
       if (typeof x[k] !== 'string') x[k] = '';
     }
     return x;
@@ -173,6 +173,7 @@ window.Store = (() => {
       startTime: '',
       endTime: '',
       supervisor: '',
+      tst: '',
       notes: '',
       createdAt: agora.toISOString(),
       atualizado: Date.now(),  // quando mudou aqui: é o que decide quem vence na troca com o banco

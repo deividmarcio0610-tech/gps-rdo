@@ -253,6 +253,10 @@ window.Screens = (() => {
             <input id="h-sup" type="text" value="${esc(rdo.supervisor)}" data-key="supervisor" placeholder="Nome do supervisor">
           </div>
           <div class="field full">
+            <label for="h-tst">Técnico de Segurança</label>
+            <input id="h-tst" type="text" value="${esc(rdo.tst)}" data-key="tst" placeholder="Nome do técnico de segurança (vai na equipe do PDF)">
+          </div>
+          <div class="field full">
             <label for="h-notes">Observações Gerais</label>
             <textarea id="h-notes" data-key="notes" data-ditado placeholder="Condições, liberações, observações do dia">${esc(rdo.notes)}</textarea>
           </div>
@@ -286,6 +290,7 @@ window.Screens = (() => {
             d.startTime = ler('startTime').value;
             d.endTime = ler('endTime').value;
             d.supervisor = ler('supervisor').value;
+            d.tst = ler('tst').value;
             d.notes = ler('notes').value;
           });
           if (!salvo) { toast('Não foi possível salvar: o aparelho está sem espaço.'); return; }
@@ -986,12 +991,26 @@ window.Screens = (() => {
           <div class="li"><span class="k">Local / Mina</span><span class="v">${esc(rdo.location || '—')}</span></div>
           <div class="li"><span class="k">Clima</span><span class="v">${esc(rdo.weather || '—')}</span></div>
           <div class="li"><span class="k">Supervisor</span><span class="v">${esc(rdo.supervisor || '—')}</span></div>
+          <div class="li"><span class="k">Técnico de Segurança</span><span class="v">${esc(rdo.tst || '—')}</span></div>
           <div class="li"><span class="k">Horas de equipamento</span><span class="v">${somaHoras}h</span></div>
           <div class="li"><span class="k">Ocorrências</span><span class="v">${rdo.occurrences.length}</span></div>
         </div>
 
+        <div class="section-label">Editar este RDO</div>
+        <div class="action-grid">
+          <button class="action-card" data-go="header">${icon('file')}Cabeçalho do RDO</button>
+          <button class="action-card" data-go="etapas">${icon('clock')}Etapas do Dia</button>
+          <button class="action-card" data-go="workforce">${icon('users')}Mão de Obra</button>
+          <button class="action-card" data-go="equipment">${icon('truck')}Equipamentos</button>
+          <button class="action-card" data-go="tasks">${icon('clipboard')}Tarefas Realizadas</button>
+          <button class="action-card" data-go="occurrences">${icon('alert')}Ocorrências</button>
+          <button class="action-card" data-go="stops">${icon('clock')}Horas Paradas</button>
+          <button class="action-card" data-go="photos">${icon('camera')}Fotos do RDO</button>
+        </div>
+
         <button class="btn block" data-act="enviar-pdf" style="background:#25D366;color:#fff">${icon('whatsapp', 18)}<span>Enviar PDF com fotos (WhatsApp)</span></button>
-        <button class="btn primary block" data-act="pdf">${icon('download', 18)}Baixar PDF com fotos</button>
+        <button class="btn primary block" data-act="pdf">${icon('output', 18)}Abrir PDF com fotos</button>
+        <button class="btn ghost block" data-act="baixar-pdf">${icon('download', 16)}Baixar o PDF</button>
         <button class="btn ghost block" data-act="whats">${icon('whatsapp', 16)}Enviar só o texto pelo WhatsApp</button>
         <button class="btn ghost block" data-act="copiar">${icon('copy', 16)}Copiar resumo em texto</button>
         ${window.Conta?.ativo?.() ? `<button class="btn ghost block" data-act="central">${icon('upload', 16)}Enviar para a central</button>` : ''}
@@ -1000,7 +1019,31 @@ window.Screens = (() => {
           : `<button class="btn dark block" data-act="finalizar">${icon('lock', 16)}Finalizar RDO</button>
              <p class="dica">Finalizado, o RDO fica só para leitura: ninguém muda sem querer depois de enviado.</p>`}`,
       bind(root) {
+        root.querySelectorAll('[data-go]').forEach((b) => {
+          b.addEventListener('click', () => app.go(b.dataset.go));
+        });
+
         root.querySelector('[data-act="pdf"]').addEventListener('click', async (e) => {
+          const btn = e.currentTarget;
+          btn.disabled = true;
+          // no navegador a aba abre já no toque: depois do await o navegador bloqueia
+          const nativo = window.Capacitor?.isNativePlatform?.() === true;
+          const janela = nativo ? null : window.open('', '_blank');
+          try {
+            const r = await window.Pdf.abrir(rdo, janela);
+            if (janela && r !== 'aberto') janela.close();
+            if (r === 'aberto') toast(`RDO_${rdo.number}.pdf aberto.`);
+            else if (r === 'compartilhado') toast('Escolha o visualizador de PDF no compartilhar do aparelho.');
+            else if (r === 'baixado') toast('O navegador bloqueou a aba nova: o PDF foi baixado.');
+            else if (r === 'salvo') toast(`RDO_${rdo.number}.pdf gravado no aparelho.`);
+          } catch (err) {
+            toast('Não foi possível abrir o PDF.');
+          } finally {
+            btn.disabled = false;
+          }
+        });
+
+        root.querySelector('[data-act="baixar-pdf"]').addEventListener('click', async (e) => {
           const btn = e.currentTarget;
           btn.disabled = true;
           try {

@@ -220,7 +220,8 @@ window.Pdf = (() => {
     if (!x.semSupervisorPadrao && !String(x.supervisor || '').trim()) x.supervisor = 'Tiago';
     const equipe = Array.isArray(x.workforce) ? x.workforce.slice() : [];
     const temTst = equipe.some((w) => /seguran/i.test(String(w?.role || '')));
-    if (!x.semTstPadrao && !temTst) equipe.push({ ...TST_PADRAO });
+    // nome digitado no cabeçalho do RDO ou no painel do dia (pedido de 09/11/2026)
+    if (!x.semTstPadrao && !temTst) equipe.push({ ...TST_PADRAO, name: String(x.tst || '').trim() });
     x.workforce = equipe;
     return x;
   }
@@ -366,13 +367,15 @@ window.Pdf = (() => {
     // 50-53: supervisor, assinatura e responsável do cliente
     c('B', 'G', 50, 50, 'Supervisor  In Haus', { ...faixaLaranja, size: 7.6 });
     c('H', 'M', 50, 50, 'Responsável técnico  (Cliente Vale)', { ...faixaLaranja, size: 7.6 });
+    // só o modelo: nome digitado nas linhas, sem foto nem assinatura desenhada (pedido de 09/11/2026).
+    // O texto encolhe até caber, em vez de vazar da célula.
     const supervisor = String(rdo.supervisor || '').trim();
-    guarda(c('B', 'G', 51, 51, `Nome:      ${supervisor}`, { bold: true, size: 6.3 }), 'Supervisor', supervisor);
+    const tst = String(rdo.tst || '').trim();
+    guarda(c('B', 'D', 51, 51, `Nome:      ${supervisor}`, { bold: true, size: 6.3, min: 4.6 }), 'Supervisor', supervisor);
+    guarda(c('E', 'G', 51, 51, tst ? `Téc. Segurança: ${tst}` : '', { bold: true, size: 6.3, min: 4.6 }), 'Técnico de Segurança', tst);
     c('H', 'M', 51, 51, 'Nome:', { bold: true, size: 6.3 });
-    c('B', 'D', 52, 52, 'Ass:', { bold: true, size: 6.3 });
-    const [ax, ay, aw, ah] = area('B', 'D', 52);
-    imagemNoQuadro(doc, rdo.autor?.assinatura, ax + 8, ay + 0.3, aw - 9, ah - 0.6);
-    c('E', 'G', 52, 52, `Data: ${rdo.date ? fmtDate(rdo.date) : ''}`, { bold: true, size: 6.3 });
+    c('B', 'G', 52, 52, 'Ass:', { bold: true, size: 6.3 });
+    c('H', 'M', 52, 52, 'Ass:', { bold: true, size: 6.3 });
     c('H', 'J', 52, 52, 'Ass:', { bold: true, size: 6.3 });
     c('K', 'M', 52, 52, 'Data:', { bold: true, size: 6.3 });
     c('B', 'M', 53, 53, '', { fill: LARANJA });
@@ -470,34 +473,8 @@ window.Pdf = (() => {
       y = doc.lastAutoTable.finalY + 4;
     }
 
-    // quem preencheu: foto do rosto do cadastro, congelada no RDO
-    const autor = rdo.autor || null;
-    if (autor?.foto) {
-      const caixaL = 30;
-      const caixaA = 26;
-      if (y + 6.4 + caixaA + 2 > fim) { doc.addPage(); y = 12; }
-      celula(doc, margem, y, larg - margem * 2, 6.4, 'QUEM PREENCHEU O RDO', rotulo);
-      y += 6.4;
-      doc.setFillColor(...CINZA);
-      doc.setDrawColor(0, 0, 0);
-      doc.setLineWidth(FINA);
-      doc.rect(margem, y, caixaL, caixaA, 'FD');
-      if (!imagemNoQuadro(doc, autor.foto, margem, y, caixaL, caixaA)) {
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(7.5);
-        doc.setTextColor(120, 120, 120);
-        doc.text('Foto indisponível', margem + caixaL / 2, y + caixaA / 2, { align: 'center' });
-      }
-      const tx = margem + caixaL + 4;
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9);
-      doc.setTextColor(...TINTA);
-      doc.text(doc.splitTextToSize(String(autor.nome || ''), larg - margem - tx)[0] || '', tx, y + 8);
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8);
-      doc.text(doc.splitTextToSize(String(autor.funcao || ''), larg - margem - tx)[0] || '', tx, y + 14);
-      imagemNoQuadro(doc, autor.assinatura, tx, y + 16, 50, 9);
-    }
+    // Só o modelo (pedido de 09/11/2026): a foto do rosto e a assinatura desenhada do
+    // cadastro não entram no PDF: o bloco antigo de quem preencheu saiu junto.
   }
 
   /** Monta o PDF de um RDO (com as fotos) e devolve o documento e o nome do arquivo. */
@@ -619,6 +596,54 @@ window.Pdf = (() => {
     }
   }
 
+  /**
+   * Abrir o PDF no visualizador, sem baixar.
+   * No computador abre o PDF numa aba nova (visualizador do próprio navegador).
+   * No APK, se houver FileOpener, entrega ao visualizador do Android; senão usa o
+   * compartilhar (o WebView não desenha PDF sozinho).
+   */
+  async function abrir(rdo, janelaAberta) {
+    const { doc, nome } = await montar(rdo);
+    const plugins = nativo();
+    if (plugins?.Filesystem) {
+      const base64 = doc.output('datauristring').split(',')[1];
+      const arq = await plugins.Filesystem.writeFile({ path: nome, data: base64, directory: 'CACHE' });
+      if (plugins.FileOpener) {
+        try {
+          await plugins.FileOpener.open({ filePath: arq.uri, contentType: 'application/pdf' });
+          return 'aberto';
+        } catch { /* sem visualizador instalado: cai no compartilhar */ }
+      }
+      if (plugins.Share) {
+        try {
+          await plugins.Share.share({ title: nome, files: [arq.uri], dialogTitle: 'Abrir o PDF' });
+          return 'compartilhado';
+        } catch (err) {
+          if (/cancel/i.test(String(err?.message || err))) return 'cancelado';
+          throw err;
+        }
+      }
+      return 'salvo';
+    }
+    const url = doc.output('bloburl');
+    // a aba já foi aberta no toque (o navegador bloqueia abrir depois do await):
+    // basta mandar a aba para o PDF
+    if (janelaAberta && !janelaAberta.closed) {
+      janelaAberta.location.href = url;
+      setTimeout(() => URL.revokeObjectURL(url), 300000);
+      return 'aberto';
+    }
+    const janela = window.open(url, '_blank');
+    if (!janela) {
+      // Safari/PWA pode bloquear a aba aberta depois do await: entrega o arquivo
+      doc.save(nome);
+      return 'baixado';
+    }
+    // a aba já pegou o arquivo; libera a memória depois, sem cortar a leitura
+    setTimeout(() => URL.revokeObjectURL(url), 300000);
+    return 'aberto';
+  }
+
   /** Baixar PDF: no navegador salva o arquivo; no APK abre o compartilhar (salvar ou enviar). */
   async function gerar(rdo) {
     const { doc, nome } = await montar(rdo);
@@ -656,5 +681,5 @@ window.Pdf = (() => {
     };
   }
 
-  return { gerar, preparar, gerarVarios, montarVarios, resumoMes, nomeMes };
+  return { abrir, gerar, preparar, gerarVarios, montarVarios, resumoMes, nomeMes };
 })();

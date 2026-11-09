@@ -67,9 +67,10 @@
       render();
     },
 
+    /** Abre o RDO escolhido na lista já na página dele (relatório), de onde se edita e gera o PDF. */
     abrir(id) {
       estado.rdoId = id;
-      estado.pilha = [];
+      estado.pilha = ['report'];
       marcar(true);
       render();
     },
