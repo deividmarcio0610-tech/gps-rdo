@@ -18,7 +18,7 @@
   };
 
   // telas que funcionam sem um RDO aberto (a de apagar não pode recriar o que acabou de sumir)
-  const SEM_RDO = new Set(['home', 'reports', 'backup', 'month', 'roster']);
+  const SEM_RDO = new Set(['home', 'reports', 'backup', 'month', 'roster', 'conta']);
 
   // APK sempre da última versão publicada no GitHub (fora do service worker do site)
   const APK_URL = 'https://github.com/deividmarcio0610-tech/gps-rdo/releases/latest/download/GPS-RDO.apk';
@@ -84,6 +84,14 @@
     },
 
     render() { render(); },
+
+    /** Volta ao início (depois de entrar, criar conta ou sair). */
+    irParaInicio() {
+      estado.pilha = [];
+      marcar(true);
+      window.scrollTo({ top: 0 });
+      render();
+    },
   };
 
   window.addEventListener('popstate', (evento) => {
@@ -130,7 +138,27 @@
     return estado.pilha[estado.pilha.length - 1] || 'home';
   }
 
+  /*
+   * Portão da conta: sem login (e sem "Continuar sem conta"), o app abre na tela de conta.
+   * Com a sessão guardada, tudo funciona sem internet: os RDOs sobem quando a rede volta.
+   */
+  function portaoDeConta() {
+    if (window.Conta?.ativo?.() || window.Conta?.semConta?.()) return false;
+    const definicao = Conta.tela();
+    el.titulo.textContent = definicao.titulo;
+    el.tela.innerHTML = definicao.html;
+    el.tela.scrollTop = 0;
+    el.voltar.classList.add('hidden');
+    el.relatorioTopo.classList.add('hidden');
+    el.instalar.innerHTML = '';
+    el.tema.innerHTML = '';
+    document.body.classList.toggle('dark', Boolean(Store.config.darkMode));
+    definicao.bind?.(el.tela);
+    return true;
+  }
+
   function render() {
+    if (portaoDeConta()) return;
     const tela = telaAtual();
     const rdo = rdoAtual(!SEM_RDO.has(tela));
     if (!rdo && !SEM_RDO.has(tela)) return;
@@ -214,6 +242,9 @@
 
   Screens.boot(app);
 
+  // conta logada: os RDOs do aparelho passam a ser os dessa conta
+  if (Conta.ativo()) Store.usarConta(Conta.usuario().id);
+
   Pwa.escutarConvite();
   Pwa.registrar();
   // quando o convite chega (Android) ou o app é instalado, redesenha a faixa
@@ -229,7 +260,7 @@
 
   // atalhos do manifest (?abrir=photos / ?abrir=report)
   const atalho = new URLSearchParams(location.search).get('abrir');
-  const telasValidas = ['header', 'workforce', 'equipment', 'tasks', 'occurrences', 'stops', 'photos', 'report', 'reports', 'backup', 'month', 'roster'];
+  const telasValidas = ['header', 'workforce', 'equipment', 'tasks', 'occurrences', 'stops', 'photos', 'report', 'reports', 'backup', 'month', 'roster', 'conta'];
   if (atalho && telasValidas.includes(atalho)) {
     estado.pilha.push(atalho);
     marcar(false);

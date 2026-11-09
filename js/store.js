@@ -3,6 +3,10 @@ window.Store = (() => {
   'use strict';
 
   const KEY = 'rdo_digital_db_v1';
+  // conta logada: cada uma tem os seus RDOs neste aparelho (chave rdo_digital_db_v1:<id>).
+  // Sem conta, fica a chave antiga, para os RDOs que já estavam no aparelho não sumirem.
+  let contaId = null;
+  const chave = () => (contaId ? `${KEY}:${contaId}` : KEY);
 
   /*
    * Equipe fixa (pedido do usuário em 07/11/2026): aparece sempre para escolher na Mão de
@@ -54,7 +58,7 @@ window.Store = (() => {
   function read() {
     const base = seed();
     try {
-      const raw = localStorage.getItem(KEY);
+      const raw = localStorage.getItem(chave());
       if (!raw) return base;
       const parsed = JSON.parse(raw);
       const config = { ...base.config, ...(parsed.config || {}) };
@@ -77,11 +81,13 @@ window.Store = (() => {
 
   function save() {
     try {
-      localStorage.setItem(KEY, JSON.stringify(db));
-      return true;
+      localStorage.setItem(chave(), JSON.stringify(db));
     } catch {
       return false;
     }
+    // com conta na central, o que foi gravado sobe sozinho quando houver internet
+    window.Conta?.agendar?.();
+    return true;
   }
 
   const uid = () => Math.random().toString(36).slice(2, 11);
@@ -299,7 +305,36 @@ window.Store = (() => {
 
     /** Tamanho aproximado dos dados salvos, em bytes (as fotos pesam quase tudo). */
     tamanho() {
-      try { return (localStorage.getItem(KEY) || '').length; } catch { return 0; }
+      try { return (localStorage.getItem(chave()) || '').length; } catch { return 0; }
+    },
+
+    get contaId() { return contaId; },
+
+    /**
+     * Passa a usar os dados de uma conta (ou os do modo sem conta, com '').
+     * Na primeira vez desta conta no aparelho, os RDOs que já estavam aqui (da chave antiga)
+     * passam a ser dela: foram digitados neste telefone por esta pessoa.
+     */
+    usarConta(id) {
+      const novo = id ? String(id) : '';
+      if (novo === (contaId || '')) return;
+      contaId = novo || null;
+      if (contaId) {
+        try {
+          const propria = localStorage.getItem(chave());
+          const antiga = localStorage.getItem(KEY);
+          if (!propria && antiga) localStorage.setItem(chave(), antiga);
+        } catch { /* sem espaço para copiar: começa vazio, os RDOs seguem na chave antiga */ }
+      }
+      db = read();
+      // as fotos seguem a mesma conta: cada banco do IndexedDB é de um dono só
+      window.Fotos?.usarConta?.(contaId || '', { adotar: true });
+    },
+
+    /** Endereço da central, guardado nas configurações (usado pelo Conta). */
+    setCentralUrl(url) {
+      db.config.centralUrl = String(url || '');
+      save();
     },
 
     /** Salva alterações de um RDO; devolve false quando a cota estoura. */

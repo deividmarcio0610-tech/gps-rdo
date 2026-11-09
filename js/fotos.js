@@ -10,19 +10,84 @@ window.Fotos = (() => {
 
   const BANCO = 'gps_rdo_fotos';
   const LOJA = 'fotos';
+  // conta logada: cada uma tem o seu banco de fotos (gps_rdo_fotos:<id>), senão a foto do
+  // RDO de um apareceria na lista do outro. Sem conta, fica o banco antigo.
+  let conta = '';
   let conexao = null;
+  const nomeBanco = () => (conta ? `${BANCO}:${conta}` : BANCO);
 
-  function abrir() {
-    if (conexao) return conexao;
-    conexao = new Promise((resolve, reject) => {
+  function abrirBruto(nome) {
+    return new Promise((resolve, reject) => {
       if (!window.indexedDB) { reject(new Error('sem IndexedDB')); return; }
-      const pedido = indexedDB.open(BANCO, 1);
+      const pedido = indexedDB.open(nome, 1);
       pedido.onupgradeneeded = () => pedido.result.createObjectStore(LOJA, { keyPath: 'id' });
       pedido.onsuccess = () => resolve(pedido.result);
       pedido.onerror = () => reject(pedido.error);
     });
+  }
+
+  function abrir() {
+    if (conexao) return conexao;
+    conexao = abrirBruto(nomeBanco());
     conexao.catch(() => { conexao = null; });
     return conexao;
+  }
+
+  function fecharConexao() {
+    const c = conexao;
+    conexao = null;
+    return c ? c.then((db) => db.close()).catch(() => {}) : Promise.resolve();
+  }
+
+  async function contar(nome) {
+    const db = await abrirBruto(nome);
+    try {
+      return await new Promise((ok, falha) => {
+        const pedido = db.transaction(LOJA).objectStore(LOJA).count();
+        pedido.onsuccess = () => ok(pedido.result);
+        pedido.onerror = () => falha(pedido.error);
+      });
+    } finally {
+      db.close();
+    }
+  }
+
+  /** Primeira vez desta conta no aparelho: as fotos que já estavam aqui passam a ser dela. */
+  async function adotarAntigas() {
+    if (!conta || (await contar(nomeBanco())) > 0 || (await contar(BANCO)) === 0) return 0;
+    const origem = await abrirBruto(BANCO);
+    const destino = await abrirBruto(nomeBanco());
+    try {
+      const todas = await new Promise((ok, falha) => {
+        const pedido = origem.transaction(LOJA).objectStore(LOJA).getAll();
+        pedido.onsuccess = () => ok(pedido.result || []);
+        pedido.onerror = () => falha(pedido.error);
+      });
+      if (!todas.length) return 0;
+      await new Promise((ok, falha) => {
+        const tx = destino.transaction(LOJA, 'readwrite');
+        const loja = tx.objectStore(LOJA);
+        todas.forEach((f) => loja.put(f));
+        tx.oncomplete = ok;
+        tx.onerror = () => falha(tx.error);
+        tx.onabort = () => falha(tx.error);
+      });
+      return todas.length;
+    } finally {
+      origem.close();
+      destino.close();
+    }
+  }
+
+  /** Troca o banco de fotos ao entrar/sair de conta. `adotar` copia as fotos antigas na 1ª vez. */
+  async function usarConta(id, { adotar = false } = {}) {
+    const novo = id ? String(id) : '';
+    if (novo === conta && conexao) return;
+    await fecharConexao();
+    conta = novo;
+    if (novo && adotar) {
+      try { await adotarAntigas(); } catch { /* sem IndexedDB: segue sem copiar */ }
+    }
   }
 
   async function operar(modo, fazer) {
@@ -136,5 +201,5 @@ window.Fotos = (() => {
     return mudou;
   }
 
-  return { reduzir, salvar, imagem, remover, migrar };
+  return { reduzir, salvar, imagem, remover, migrar, usarConta };
 })();

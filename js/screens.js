@@ -20,6 +20,7 @@ window.Screens = (() => {
     roster: 'Cadastro da Equipe',
     stops: 'Horas Paradas',
     month: 'Resumo do Mês',
+    conta: 'Minha Conta',
   };
 
   // -------------------------------------------------------------- filtro dos RDOs
@@ -136,6 +137,7 @@ window.Screens = (() => {
           <button class="action-card" data-go="month">${icon('chart')}Resumo do Mês</button>
           <button class="action-card wide" data-go="report">${icon('output', 22)}Gerar Relatório</button>
           <button class="action-card wide neutro-card" data-go="backup">${icon('shield', 20)}Cópia de Segurança</button>
+          <button class="action-card wide neutro-card" data-go="conta">${icon('lock', 20)}Minha Conta</button>
           <button class="action-card wide danger-card" data-go="reports">${icon('trash', 20)}Apagar Relatórios</button>
         </div>
 
@@ -913,6 +915,7 @@ window.Screens = (() => {
         <button class="btn primary block" data-act="pdf">${icon('download', 18)}Baixar PDF com fotos</button>
         <button class="btn ghost block" data-act="whats">${icon('whatsapp', 16)}Enviar só o texto pelo WhatsApp</button>
         <button class="btn ghost block" data-act="copiar">${icon('copy', 16)}Copiar resumo em texto</button>
+        ${window.Conta?.ativo?.() ? `<button class="btn ghost block" data-act="central">${icon('upload', 16)}Enviar para a central</button>` : ''}
         ${travado(rdo)
           ? `${avisoTravado(rdo)}<button class="btn ghost block" data-act="reabrir">${icon('unlock', 16)}Reabrir RDO para mudar</button>`
           : `<button class="btn dark block" data-act="finalizar">${icon('lock', 16)}Finalizar RDO</button>
@@ -988,6 +991,8 @@ window.Screens = (() => {
           if (!ok) return;
           Store.update(rdo.id, (d) => { d.status = 'final'; d.finalizedAt = new Date().toISOString(); });
           toast(`RDO ${rdo.number} finalizado.`);
+          // com conta na central, o RDO finalizado sobe na hora (se houver internet)
+          window.Conta?.enviarTudo?.({ silencioso: true }).catch(() => {});
           app.render();
         });
 
@@ -998,6 +1003,16 @@ window.Screens = (() => {
           Store.update(rdo.id, (d) => { d.status = 'draft'; d.finalizedAt = null; });
           toast(`RDO ${rdo.number} reaberto.`);
           app.render();
+        });
+
+        root.querySelector('[data-act="central"]')?.addEventListener('click', async (ev) => {
+          const btn = ev.currentTarget;
+          btn.disabled = true;
+          try {
+            await window.Conta.enviarTudo();
+            toast(`RDO ${rdo.number} (e os outros deste aparelho) enviado para a central.`);
+          } catch (e) { toast(e.message); }
+          btn.disabled = false;
         });
 
         root.querySelector('[data-act="copiar"]').addEventListener('click', async () => {
@@ -1213,6 +1228,12 @@ window.Screens = (() => {
         <button class="btn primary block" data-act="salvar-copia"${Store.rdos.length ? '' : ' disabled'}>${icon('download', 18)}<span>Salvar cópia de segurança</span></button>
         <button class="btn ghost block" data-act="restaurar">${icon('upload', 18)}Restaurar cópia</button>
         <input type="file" accept="application/json,.json" id="copia-input" hidden>
+        ${window.Conta?.ativo?.() ? `
+          <div class="section-label">Central do supervisor</div>
+          <button class="btn ghost block" data-act="central-enviar">${icon('upload', 18)}Enviar meus RDOs para a central</button>
+          <button class="btn ghost block" data-act="central-baixar">${icon('download', 18)}Baixar meus RDOs da central</button>
+          <p class="dica">Com a conta, cada RDO gravado sobe sozinho quando houver internet. As fotos ficam no aparelho;
+            a central recebe os dados e a sua assinatura.</p>` : ''}
         <p class="dica">Restaurar só acrescenta: RDO que já está neste aparelho fica como está.
           Faça uma cópia por semana, ou antes de trocar de celular.</p>`,
       bind(root) {
@@ -1242,6 +1263,21 @@ window.Screens = (() => {
             if (r === 'compartilhado') toast('Cópia entregue. Escolha onde guardar (Arquivos, Drive...).');
             if (r === 'baixado') toast('Cópia baixada na pasta de downloads.');
           },
+        });
+
+        root.querySelector('[data-act="central-enviar"]')?.addEventListener('click', async (ev) => {
+          ev.currentTarget.disabled = true;
+          try { await window.Conta.enviarTudo(); } catch (e) { toast(e.message); }
+          ev.currentTarget.disabled = false;
+        });
+        root.querySelector('[data-act="central-baixar"]')?.addEventListener('click', async (ev) => {
+          ev.currentTarget.disabled = true;
+          try {
+            const n = await window.Conta.recuperar();
+            toast(n ? `${n} RDO(s) vieram da central.` : 'Tudo o que está na central já está aqui.');
+            if (n) app.render();
+          } catch (e) { toast(e.message); }
+          ev.currentTarget.disabled = false;
         });
 
         const input = root.querySelector('#copia-input');
@@ -1284,7 +1320,9 @@ window.Screens = (() => {
     };
   }
 
-  const mapa = { home, header, workforce, equipment, tasks, occurrences, stops, photos, report, reports, backup, month, roster };
+  const conta = () => window.Conta.tela();
+
+  const mapa = { home, header, workforce, equipment, tasks, occurrences, stops, photos, report, reports, backup, month, roster, conta };
 
   return {
     boot(appRef) { app = appRef; },
