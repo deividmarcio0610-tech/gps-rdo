@@ -109,6 +109,8 @@ window.Screens = (() => {
       if (!achados.length) {
         return `<div class="empty">${filtrando ? 'Nenhum RDO nesta data/tipo.' : 'Nenhum RDO registrado ainda.'}</div>`;
       }
+      // quem ainda não subiu para o banco ganha um selo na lista
+      const naFila = new Set((window.Conta?.pendentes?.() || []).map((x) => x.id));
       return `
         <div class="contagem">${resumoFiltro(achados.length)}${!filtrando && achados.length > LIMITE ? ` · mostrando os ${LIMITE} mais recentes` : ''}</div>
         ${mostrados.map((r) => `
@@ -117,6 +119,7 @@ window.Screens = (() => {
               <div class="num">RDO ${esc(r.number)}</div>
               <div class="meta">${fmtDate(r.date)} · ${esc(r.location || 'Sem local')}</div>
             </div>
+            ${naFila.has(r.id) ? '<span class="badge amber">aguardando envio</span>' : ''}
             ${seloTipo(r)}
             <span class="arrow">${icon('chevron', 16)}</span>
           </button>`).join('')}`;
