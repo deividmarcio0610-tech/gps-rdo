@@ -72,16 +72,82 @@ window.Conta = (() => {
   // ------------------------------------------------------------ troca com o banco
 
   let timer = null;
+  let retryTimer = null;
+  let tentativasRetry = 0;
   let sincronizando = false;
+  let ouvintesLigados = false;
 
-  const mapaEnviados = () => {
-    try { return JSON.parse(localStorage.getItem(`${CHAVE_ENVIADOS}:${sessao?.usuario?.id || ''}`) || '{}'); } catch { return {}; }
+  const CHAVE_APAGADOS = 'gps_rdo_apagados_v1';
+  const CHAVE_ERROS = 'gps_rdo_erros_v1';
+  const CHAVE_ULTIMA = 'gps_rdo_ultima_sync_v1';
+
+  const chaveDe = (base) => `${base}:${sessao?.usuario?.id || ''}`;
+  const lerMapa = (base) => {
+    try { return JSON.parse(localStorage.getItem(chaveDe(base)) || '{}'); } catch { return {}; }
   };
+  const gravarMapa = (base, mapa) => {
+    try { localStorage.setItem(chaveDe(base), JSON.stringify(mapa)); } catch { /* sem espaço: tenta de novo no próximo envio */ }
+  };
+
+  const mapaEnviados = () => lerMapa(CHAVE_ENVIADOS);
   const marcarEnviado = (id, quando) => {
     const mapa = mapaEnviados();
     mapa[id] = quando;
-    try { localStorage.setItem(`${CHAVE_ENVIADOS}:${sessao?.usuario?.id || ''}`, JSON.stringify(mapa)); } catch { /* sem espaço: sobe de novo */ }
+    gravarMapa(CHAVE_ENVIADOS, mapa);
   };
+
+  // Exclusões: sem a lápide, o RDO apagado no aparelho desceria de novo do banco.
+  const marcarApagado = (docId) => {
+    const mapa = lerMapa(CHAVE_APAGADOS);
+    mapa[docId] = Date.now();
+    gravarMapa(CHAVE_APAGADOS, mapa);
+  };
+  const desmarcarApagado = (docId) => {
+    const mapa = lerMapa(CHAVE_APAGADOS);
+    if (!(docId in mapa)) return;
+    delete mapa[docId];
+    gravarMapa(CHAVE_APAGADOS, mapa);
+  };
+
+  // Falhas que não adiantam repetir (4xx de regra/dado/token): ficam registradas por
+  // versão do RDO; só uma edição nova faz o app tentar de novo.
+  const PERMANENTES = new Set(['permission-denied', 'invalid-argument', 'unauthenticated']);
+  const permanente = (e) => PERMANENTES.has(String(e?.codigo || e?.code || ''));
+  const mapaErros = () => lerMapa(CHAVE_ERROS);
+
+  /** RDOs que ainda precisam subir (versão local mais nova que a última enviada). */
+  function pendentes() {
+    const enviados = mapaEnviados();
+    const erros = mapaErros();
+    return Store.rdos.filter((r) => {
+      const quando = Number(r.atualizado) || 0;
+      if (erros[r.id]?.versao === quando) return false;
+      return quando > (Number(enviados[r.id]) || 0);
+    });
+  }
+
+  /** Resumo para a tela: fila, última sincronização e se há internet. */
+  function textoStatus() {
+    const fila = pendentes().length;
+    const u = Number(localStorage.getItem(chaveDe(CHAVE_ULTIMA))) || 0;
+    const hora = u ? new Date(u).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+    const partes = [fila ? `${fila} RDO(s) aguardando envio` : 'Tudo enviado ao banco'];
+    if (hora) partes.push(`última sincronização ${hora}`);
+    if (navigator.onLine === false) partes.push('sem internet agora');
+    return partes.join(' · ');
+  }
+
+  function atualizarStatus() {
+    const el = document.querySelector?.('[data-sync]');
+    if (el) el.textContent = textoStatus();
+  }
+
+  const statusSync = () => ({
+    pendentes: pendentes().length,
+    erros: Object.keys(mapaErros()).length,
+    sincronizando,
+    ultima: Number(localStorage.getItem(chaveDe(CHAVE_ULTIMA))) || 0,
+  });
 
   /** Sobe um RDO; se ele for de outra pessoa (supervisor corrigindo), grava no documento do dono. */
   async function publicarUm(rdo) {
@@ -127,10 +193,27 @@ window.Conta = (() => {
     if (sincronizando) return { enviados: 0, recebidos: 0, ocupado: true };
     sincronizando = true;
     try {
+      // 1. exclusões pendentes: o que foi apagado no aparelho sai do banco (a lápide só
+      //    cai depois que o banco confirma; sem rede ela espera a próxima volta)
+      const apagados = lerMapa(CHAVE_APAGADOS);
+      for (const docId of Object.keys(apagados)) {
+        try {
+          await Nuvem.apagar(docId);
+          desmarcarApagado(docId);
+        } catch (e) {
+          // documento que não existe mais: nada a repetir
+          if (permanente(e)) desmarcarApagado(docId);
+        }
+      }
+      const lapes = lerMapa(CHAVE_APAGADOS);
+
       const enviadosAntes = mapaEnviados();
+      const erros = mapaErros();
       const nuvem = await Nuvem.meusRdos();
       const porId = new Map();
-      nuvem.forEach((n) => porId.set(n.json.id, n));
+      nuvem.forEach((n) => {
+        if (!lapes[n.docId]) porId.set(n.json.id, n);
+      });
 
       let enviados = 0;
       let recebidos = 0;
@@ -138,16 +221,24 @@ window.Conta = (() => {
       for (const r of Store.rdos.slice()) {
         const marca = Number(enviadosAntes[r.id]) || 0;
         const quando = Number(r.atualizado) || 0;
+        // 4xx já visto nesta versão: não repete (uma edição nova muda o carimbo)
+        if (erros[r.id]?.versao === quando) continue;
         if (!porId.has(r.id) || quando > marca) {
           try {
             await publicarUm(r);
             marcarEnviado(r.id, quando);
+            delete erros[r.id];
             enviados += 1;
-          } catch { /* sem rede ou sem permissão: tenta no próximo envio */ }
+          } catch (e) {
+            // falha de rede fica só na fila; 4xx fica registrado e exposto na tela
+            if (permanente(e)) erros[r.id] = { versao: quando, erro: e.message, em: Date.now() };
+          }
         }
       }
+      gravarMapa(CHAVE_ERROS, erros);
 
       for (const n of nuvem) {
+        if (lapes[n.docId]) continue; // apagado aqui: não desce de novo
         const local = Store.find(n.json.id);
         if (!local) {
           if (await baixarRdo(n).catch(() => false)) recebidos += 1;
@@ -158,7 +249,7 @@ window.Conta = (() => {
           Store.update(local.id, (x) => {
             const fotos = x.photos?.length ? x.photos : (n.json.photos || []);
             Object.assign(x, n.json, { photos: fotos, dono: n.dono, atualizado: n.atualizado });
-          });
+          }, { deBanco: true });
           marcarEnviado(local.id, n.atualizado);
           recebidos += 1;
         }
@@ -176,16 +267,57 @@ window.Conta = (() => {
       return { enviados: 0, recebidos: 0, erro: e.message };
     } finally {
       sincronizando = false;
+      try { localStorage.setItem(chaveDe(CHAVE_ULTIMA), String(Date.now())); } catch { /* sem espaço */ }
+      atualizarStatus();
+      agendarRetry();
     }
   }
 
   const enviarTudo = (opcoes) => sincronizar(opcoes);
 
-  /** Agenda a troca com o banco (usada a cada gravação no aparelho). */
+  /**
+   * Agenda a troca com o banco (usada a cada gravação no aparelho). Com internet, sobe em
+   * ~1 s; sem internet, o Firestore já guarda a gravação em fila local e o retry cuida dela.
+   */
   function agendar() {
     if (!ativo()) return;
     clearTimeout(timer);
-    timer = setTimeout(() => { sincronizar({ silencioso: true }).catch(() => {}); }, 4000);
+    const espera = navigator.onLine === false ? 4000 : 1200;
+    timer = setTimeout(() => { sincronizar({ silencioso: true }).catch(() => {}); }, espera);
+  }
+
+  /** Reenvio com espera crescente enquanto houver fila e rede (15 s → no máximo 5 min). */
+  function agendarRetry() {
+    clearTimeout(retryTimer);
+    if (!ativo() || !pendentes().length || navigator.onLine === false) {
+      tentativasRetry = 0;
+      return;
+    }
+    const espera = Math.min(15000 * 2 ** tentativasRetry, 300000);
+    tentativasRetry = Math.min(tentativasRetry + 1, 5);
+    retryTimer = setTimeout(() => { sincronizar({ silencioso: true }).catch(() => {}); }, espera);
+  }
+
+  /**
+   * Gatilhos de sincronização além da gravação: volta da internet, app em primeiro plano
+   * e reabertura. No navegador/WebView não existe sincronização com o app fechado.
+   */
+  function ligarRede() {
+    if (ouvintesLigados) return;
+    ouvintesLigados = true;
+    window.addEventListener?.('online', () => {
+      tentativasRetry = 0;
+      sincronizar({ silencioso: true }).catch(() => {});
+    });
+    window.addEventListener?.('offline', () => { clearTimeout(retryTimer); });
+    document.addEventListener?.('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && navigator.onLine !== false) {
+        sincronizar({ silencioso: true }).catch(() => {});
+      }
+    });
+    window.addEventListener?.('focus', () => {
+      if (navigator.onLine !== false) sincronizar({ silencioso: true }).catch(() => {});
+    });
   }
 
   /** Só traz o que falta no aparelho (celular novo, cópia perdida). */
@@ -194,12 +326,20 @@ window.Conta = (() => {
     return r.recebidos || 0;
   }
 
-  /** RDO apagado no aparelho sai do banco também. */
+  /** RDO apagado no aparelho sai do banco também (ou fica na lápide para a próxima volta). */
   async function apagarNaNuvem(rdo) {
     if (!ativo() || !rdo || !Nuvem.configurado()) return;
     const dono = rdo.dono || usuario()?.id;
     if (!dono) return;
-    await Nuvem.apagar(Nuvem.idDoc(dono, rdo.id)).catch(() => {});
+    const docId = Nuvem.idDoc(dono, rdo.id);
+    marcarApagado(docId);
+    try {
+      await Nuvem.apagar(docId);
+      desmarcarApagado(docId);
+    } catch (e) {
+      // sem rede: a lápide espera; 4xx: não existe mais ou não é nosso — não insiste
+      if (permanente(e)) desmarcarApagado(docId);
+    }
   }
 
   /**
@@ -376,6 +516,7 @@ window.Conta = (() => {
         <div class="name">${esc(u.nome || 'Sua conta')}</div>
         <div class="sub">${esc(u.email || '')}${u.mestre ? ' · conta principal' : ''}</div>
       </div></div>
+      <div class="sub" data-sync>${esc(textoStatus())}</div>
       ${u.assinatura ? `<div class="field"><label>Sua assinatura</label><img class="assina-img" src="${esc(u.assinatura)}" alt="Assinatura"></div>` : ''}
       <button class="btn primary block" data-act="enviar">${icon('upload', 16)}Enviar meus RDOs agora</button>
       <button class="btn ghost block" data-act="recuperar">${icon('download', 16)}Trazer os RDOs do banco</button>
@@ -542,6 +683,7 @@ window.Conta = (() => {
    * Firebase diz quem entrou, o perfil local (e a tela) acompanham, e os RDOs trocam.
    */
   async function iniciar() {
+    ligarRede();
     if (!Nuvem.configurado()) return;
     try {
       Nuvem.aoMudar(async (user) => {
@@ -566,6 +708,7 @@ window.Conta = (() => {
     iniciar, ativo, usuario, ehMestre,
     entrar, cadastrar, esqueci, sair,
     enviarTudo, sincronizar, agendar, recuperar, apagarNaNuvem,
+    pendentes, statusSync, textoStatus,
     abrirDoBanco,
     tela, ligarAssinatura,
     get sessao() { return sessao; },

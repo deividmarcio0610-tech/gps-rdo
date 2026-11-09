@@ -235,6 +235,8 @@ window.Store = (() => {
       marcarNumero(rdo.number);
       db.rdos.unshift(rdo);
       save();
+      // com conta na central, o RDO novo sobe assim que houver rede
+      window.Conta?.agendar?.();
       return rdo;
     },
 
@@ -292,6 +294,7 @@ window.Store = (() => {
       window.Fotos?.remover(rdo.photos);
       // apagado no aparelho, sai do banco na nuvem também (o dono ou a conta principal)
       window.Conta?.apagarNaNuvem?.(rdo);
+      window.Conta?.agendar?.();
       return save();
     },
 
@@ -308,7 +311,10 @@ window.Store = (() => {
       db.rdos.sort((a, b) => String(b.number).localeCompare(String(a.number)));
       Object.entries(ultimos || {}).forEach(([dia, n]) => marcarNumero(`${dia}-${n}`));
       novos.forEach((r) => marcarNumero(r.number));
-      if (save()) return novos.length;
+      if (save()) {
+        if (novos.length) window.Conta?.agendar?.();
+        return novos.length;
+      }
       db.rdos = antes.rdos;
       db.ultimos = antes.ultimos;
       return -1;
@@ -373,7 +379,7 @@ window.Store = (() => {
     },
 
     /** Salva alterações de um RDO; devolve false quando a cota estoura. */
-    update(id, mutate) {
+    update(id, mutate, { deBanco = false } = {}) {
       const i = db.rdos.findIndex((r) => r.id === id);
       if (i < 0) return false;
       const antes = JSON.stringify(db.rdos[i]);
@@ -381,7 +387,11 @@ window.Store = (() => {
       mutate(db.rdos[i]);
       // quem mexeu de verdade carimba a hora; quem só trouxe uma versão do banco mantém a dele
       if (db.rdos[i].atualizado === carimbo) db.rdos[i].atualizado = Date.now();
-      if (save()) return true;
+      if (save()) {
+        // veio do banco não volta para o banco (evita laço de subir o que acabou de descer)
+        if (!deBanco) window.Conta?.agendar?.();
+        return true;
+      }
       // cota estourou: desfaz também na memória. Antes a alteração ficava só na tela,
       // sumia ao reabrir e travava a gravação de tudo o que viesse depois.
       db.rdos[i] = JSON.parse(antes);

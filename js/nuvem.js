@@ -48,7 +48,12 @@ window.Nuvem = (() => {
     return mapa[codigo] || e?.message || 'Não foi possível falar com o banco.';
   }
 
-  const falha = (e) => new Error(traduzir(e));
+  const falha = (e) => {
+    const erro = new Error(traduzir(e));
+    // quem chama (js/conta.js) separa falha de rede de falha que não adianta repetir
+    erro.codigo = String(e?.code || '');
+    return erro;
+  };
 
   function iniciar() {
     if (iniciando) return iniciando;
