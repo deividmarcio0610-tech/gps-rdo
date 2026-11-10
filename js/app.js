@@ -15,6 +15,9 @@
   const estado = {
     rdoId: null,
     pilha: [],  // telas empilhadas; vazio = início
+    // Em Gerar Relatório, só o RDO escolhido pelo toque abre. Sem isso a tela monta
+    // já no relatório inteiro ao abrir a página, em vez de mostrar só a lista.
+    escolhido: false,
   };
 
   // telas que funcionam sem um RDO aberto (a de apagar não pode recriar o que acabou de sumir)
@@ -48,7 +51,7 @@
    * todos no popstate, que só redesenha a pilha guardada naquela entrada.
    */
   const marcar = (substituir) => {
-    const registro = { pilha: [...estado.pilha] };
+    const registro = { pilha: [...estado.pilha], escolhido: estado.escolhido };
     if (substituir) history.replaceState(registro, '');
     else history.pushState(registro, '');
   };
@@ -63,15 +66,20 @@
         estado.pilha.push(tela);
         marcar(false);
       }
+      // só a escolha explícita (botão RELATÓRIO do início) abre o relatório inteiro;
+      // qualquer outra entrada em Gerar Relatório mostra a lista
+      estado.escolhido = tela === 'report';
       if (!SEM_RDO.has(tela)) rdoAtual(true);
       render();
     },
 
-    /** Abre o RDO escolhido na lista já na página dele (relatório), de onde se edita e gera o PDF. */
+    /** Abre o RDO escolhido na lista já na página dele (relatório), de onde se edita e gera o PDF.
+     *  Entra por cima, como as demais telas: o voltar retorna à lista (ou tela) de onde se abriu. */
     abrir(id) {
       estado.rdoId = id;
+      estado.escolhido = true;
       estado.pilha = ['report'];
-      marcar(true);
+      marcar(false);
       render();
     },
 
@@ -89,6 +97,7 @@
     /** Volta ao início (depois de entrar, criar conta ou sair). */
     irParaInicio() {
       estado.pilha = [];
+      estado.escolhido = false;
       marcar(true);
       window.scrollTo({ top: 0 });
       render();
@@ -100,6 +109,7 @@
     if (UI.fecharFolhas()) { marcar(false); return; }
     const pilha = evento.state?.pilha;
     estado.pilha = Array.isArray(pilha) ? [...pilha] : [];
+    estado.escolhido = evento.state?.escolhido === true;
     render();
   });
 
@@ -161,8 +171,10 @@
   function render() {
     if (portaoDeConta()) return;
     const tela = telaAtual();
-    const rdo = rdoAtual(!SEM_RDO.has(tela));
-    if (!rdo && !SEM_RDO.has(tela)) return;
+    // Gerar Relatório sem escolha mostra só a lista: nem escolhe nem cria RDO ao montar
+    const soLista = tela === 'report' && !estado.escolhido;
+    const rdo = soLista ? null : rdoAtual(!SEM_RDO.has(tela));
+    if (!rdo && !SEM_RDO.has(tela) && !soLista) return;
 
     const definicao = Screens.get(tela)(rdo);
     el.titulo.textContent = definicao.titulo;

@@ -999,18 +999,36 @@ window.Screens = (() => {
 
   // -------------------------------------------------------------- relatório
 
+  // bloco de escolha do RDO, usado no Gerar Relatório (lista e relatório aberto)
+  const blocoListaRdo = (atualId = null) => `
+    <div class="history relatorio-lista">
+      <div class="head">
+        <span class="label">Escolha o RDO</span>
+      </div>
+      ${filtroHtml()}
+      <div id="lista-rdo">${listaRdoHtml(atualId)}</div>
+    </div>`;
+
   function report(rdo) {
+    // sem RDO escolhido, a página mostra só a lista: abrir ou recarregar não abre relatório
+    if (!rdo) {
+      return {
+        titulo: TITULOS.report,
+        html: blocoListaRdo(),
+        bind(root) {
+          ligarListaRdo(root, (id) => {
+            app.abrir(id);
+            const aberto = Store.find(id);
+            if (aberto) toast(`RDO ${aberto.number} aberto.`);
+          });
+        },
+      };
+    }
     const somaHoras = rdo.equipmentList.reduce((s, e) => s + Math.max(0, (Number(e.hoursEnd) || 0) - (Number(e.hoursStart) || 0)), 0);
     return {
       titulo: TITULOS.report,
       html: `
-        <div class="history relatorio-lista">
-          <div class="head">
-            <span class="label">Escolha o RDO</span>
-          </div>
-          ${filtroHtml()}
-          <div id="lista-rdo">${listaRdoHtml(rdo.id)}</div>
-        </div>
+        ${blocoListaRdo(rdo.id)}
 
         <div class="section-label">RDO ${esc(rdo.number)} · ${fmtDate(rdo.date)}</div>
         <div class="summary">
