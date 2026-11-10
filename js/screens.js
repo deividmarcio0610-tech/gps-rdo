@@ -157,8 +157,6 @@ window.Screens = (() => {
       const n = rdo ? (rdo[lista] || []).length : 0;
       return n ? `<span class="badge-count">${n}</span>` : '';
     };
-    const listaHtml = () => listaRdoHtml();
-
     return {
       titulo: TITULOS.home,
       html: `
@@ -187,15 +185,8 @@ window.Screens = (() => {
           <button class="action-card wide danger-card" data-go="reports">${icon('trash', 20)}Apagar Relatórios</button>
           <button class="action-card wide neutro-card sair-card" data-go="sair">${icon('sair', 20)}Sair da conta</button>
         </div>
-
-        <div class="history">
-          <div class="head">
-            <span class="label">Relatórios</span>
-            <button class="btn ghost" data-act="novo" style="padding:6px 10px;font-size:11.5px">${icon('plus', 14)}Novo RDO</button>
-          </div>
-          ${filtroHtml()}
-          <div id="lista-rdo">${listaHtml()}</div>
-        </div>`,
+        <!-- pedido de 10/11/2026: a lista "Relatórios" (com Novo RDO e o filtro) saiu daqui e fica
+             na página Relatórios (botão RELATÓRIO do topo e Gerar Relatório) -->`,
       bind(root) {
         root.querySelectorAll('[data-go]').forEach((b) => {
           b.addEventListener('click', () => app.go(b.dataset.go));
@@ -228,17 +219,6 @@ window.Screens = (() => {
           const aba = window.open(url.href, '_blank');
           if (!aba) { app.go('controle'); return; }
           try { aba.opener = null; } catch { /* nada a fazer */ }
-        });
-        root.querySelector('[data-act="novo"]')?.addEventListener('click', () => {
-          const novo = Store.createRdo();
-          if (!novo) { toast(SEM_ESPACO); return; }
-          app.abrir(novo.id);
-          toast(`Novo RDO ${novo.number} criado.`);
-        });
-        ligarListaRdo(root, (id) => {
-          app.abrir(id);
-          const aberto = Store.find(id);
-          if (aberto) toast(`RDO ${aberto.number} aberto.`);
         });
       },
     };
@@ -1110,10 +1090,21 @@ window.Screens = (() => {
   // -------------------------------------------------------------- relatório
 
   // bloco de escolha do RDO, usado no Gerar Relatório (lista e relatório aberto)
+  /** Novo RDO, na página Relatórios: cria e abre já na página dele. */
+  function ligarNovoRdo(root) {
+    root.querySelector('[data-act="novo"]')?.addEventListener('click', () => {
+      const novo = Store.createRdo();
+      if (!novo) { toast(SEM_ESPACO); return; }
+      app.abrir(novo.id);
+      toast(`Novo RDO ${novo.number} criado.`);
+    });
+  }
+
   const blocoListaRdo = (atualId = null) => `
     <div class="history relatorio-lista">
       <div class="head">
-        <span class="label">Escolha o RDO</span>
+        <span class="label">Relatórios</span>
+        <button class="btn ghost" data-act="novo" style="padding:6px 10px;font-size:11.5px">${icon('plus', 14)}Novo RDO</button>
       </div>
       ${filtroHtml()}
       <div id="lista-rdo">${listaRdoHtml(atualId)}</div>
@@ -1156,6 +1147,7 @@ window.Screens = (() => {
         titulo: TITULOS.report,
         html: blocoListaRdo(),
         bind(root) {
+          ligarNovoRdo(root);
           ligarListaRdo(root, (id) => {
             app.abrir(id);
             const aberto = Store.find(id);
@@ -1218,6 +1210,7 @@ window.Screens = (() => {
           b.addEventListener('click', () => app.go(b.dataset.go));
         });
 
+        ligarNovoRdo(root);
         // pedido de 09/11/2026: escolher o RDO aqui mesmo; troca o RDO e fica no Gerar Relatório
         ligarListaRdo(root, (id) => {
           if (id === rdo.id) {
