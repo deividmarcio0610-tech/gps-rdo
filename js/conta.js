@@ -41,17 +41,140 @@ window.Conta = (() => {
 
   // ------------------------------------------------------------ entrar / sair
 
+  /*
+   * Cadastro sem internet (pedido de 10/11/2026: "cadastro tem que ser realizado com ou sem
+   * internet"). Sem sinal, a conta é criada só neste aparelho, com um id provisório, e a pessoa
+   * já usa o app: os RDOs e as fotos ficam guardados com essa conta. Quando a internet volta, o
+   * app cria a conta no banco com os mesmos dados, passa os RDOs e as fotos para ela e envia.
+   * A senha fica guardada no aparelho só até a conta ser criada no banco (o banco precisa dela
+   * para criar a conta); depois é apagada.
+   */
+  const CHAVE_PENDENTE = 'gps_rdo_cadastro_pendente_v1';
+  const lerPendente = () => { try { return JSON.parse(localStorage.getItem(CHAVE_PENDENTE) || 'null'); } catch { return null; } };
+  const gravarPendente = (p) => {
+    try {
+      if (p) localStorage.setItem(CHAVE_PENDENTE, JSON.stringify(p));
+      else localStorage.removeItem(CHAVE_PENDENTE);
+      return true;
+    } catch { return false; }
+  };
+  const ehPendente = () => Boolean(sessao?.usuario?.pendente);
+  const perfilDoPendente = (p) => ({
+    id: p.id, email: p.email, nome: p.nome, funcao: p.funcao,
+    assinatura: p.assinatura || '', facial: p.facial || '', mestre: false, pendente: true,
+  });
+  /** Falha por falta de sinal (e não por dado errado, que tem de ser mostrado à pessoa). */
+  const semSinal = (e) => navigator.onLine === false
+    || ['unavailable', 'deadline-exceeded', 'auth/network-request-failed', 'auth/internal-error'].includes(String(e?.codigo || e?.code || ''))
+    || /network|conex|internet|biblioteca do banco/i.test(String(e?.message || ''));
+
   const entrar = async (email, senha) => {
-    const perfil = await Nuvem.entrar(email, senha);
+    const limpo = String(email || '').trim().toLowerCase();
+    let perfil;
+    try {
+      perfil = await Nuvem.entrar(limpo, senha);
+    } catch (e) {
+      // sem sinal: só a conta criada neste aparelho e ainda não enviada consegue entrar
+      const p = lerPendente();
+      if (semSinal(e) && p && p.email === limpo && p.senha === senha) {
+        return usarPerfil(perfilDoPendente(p));
+      }
+      if (semSinal(e)) {
+        throw new Error('Sem internet. Para entrar sem sinal, a conta tem de ter sido criada neste aparelho; se não, tente quando tiver internet.');
+      }
+      throw e;
+    }
     usarPerfil(perfil);
+    // a conta provisória deste aparelho era desta pessoa: os RDOs dela vêm junto
+    const p = lerPendente();
+    if (p && p.email === limpo) await adotarPendente(p, perfil);
     return perfil;
   };
 
+  /** Cria a conta: no banco, ou, sem sinal, só neste aparelho. Devolve { perfil, semInternet }. */
   const cadastrar = async (dados) => {
-    const perfil = await Nuvem.cadastrar(dados);
-    usarPerfil(perfil);
-    return perfil;
+    const email = String(dados.email || '').trim().toLowerCase();
+    try {
+      const perfil = await Nuvem.cadastrar({ ...dados, email });
+      usarPerfil(perfil);
+      return { perfil, semInternet: false };
+    } catch (e) {
+      if (!semSinal(e)) throw e;
+    }
+    const existente = lerPendente();
+    if (existente && existente.email !== email) {
+      throw new Error(`Já há uma conta criada sem internet neste aparelho (${existente.email}) esperando o sinal para ir ao banco. Entre com ela, ou espere a internet para criar outra.`);
+    }
+    const p = {
+      id: existente?.id || `local-${Store.uid()}`,
+      nome: String(dados.nome || '').trim(),
+      funcao: String(dados.funcao || '').trim(),
+      email,
+      senha: dados.senha,
+      assinatura: dados.assinatura || '',
+      facial: dados.facial || '',
+      criado: Date.now(),
+      erro: '',
+    };
+    if (!gravarPendente(p)) throw new Error('O aparelho está sem espaço para guardar o cadastro. Apague relatórios antigos e tente de novo.');
+    const perfil = usarPerfil(perfilDoPendente(p));
+    return { perfil, semInternet: true };
   };
+
+  /** Passa os RDOs e as fotos da conta provisória para a conta de verdade e apaga a provisória. */
+  async function adotarPendente(p, perfil) {
+    const trazidos = Store.trazerDeConta(p.id);
+    try { await Fotos.copiarDeConta?.(p.id); } catch { /* as fotos ficam na conta provisória; não some nada */ }
+    // o banco não tem o perfil (conta criada no meio de uma queda de sinal): grava agora
+    if (!perfil.nome || perfil.nome === perfil.email) {
+      try {
+        const completo = await Nuvem.salvarPerfil({ nome: p.nome, funcao: p.funcao, email: p.email, assinatura: p.assinatura, facial: p.facial, mestre: false, criado: p.criado });
+        if (completo) usarPerfil(completo);
+      } catch { /* fica para a próxima vez que o perfil for salvo */ }
+    }
+    if (trazidos >= 0) gravarPendente(null);
+    return trazidos;
+  }
+
+  let concluindo = false;
+  /**
+   * Conta criada sem internet: com sinal, cria no banco e passa tudo para ela. Chamado pela
+   * sincronização (abrir o app, voltar a rede, gravar). Devolve { criada } / { semRede } / { erro }.
+   */
+  async function concluirCadastroPendente() {
+    const p = lerPendente();
+    if (!p || !ehPendente() || concluindo) return { semPendente: true };
+    if (navigator.onLine === false || !Nuvem.configurado()) return { semRede: true };
+    concluindo = true;
+    try {
+      let perfil;
+      try {
+        perfil = await Nuvem.cadastrar({ nome: p.nome, funcao: p.funcao, email: p.email, senha: p.senha, assinatura: p.assinatura, facial: p.facial });
+      } catch (e) {
+        if (semSinal(e)) return { semRede: true };
+        if (String(e?.codigo || '') !== 'auth/email-already-in-use') throw e;
+        // o e-mail já tem conta (criada em outro aparelho, ou numa tentativa que caiu no meio):
+        // se a senha for a mesma, é a mesma pessoa e a conta é dela
+        try {
+          perfil = await Nuvem.entrar(p.email, p.senha);
+        } catch (e2) {
+          if (semSinal(e2)) return { semRede: true };
+          throw new Error('Este e-mail já tem conta no banco com outra senha. Toque em Sair e entre com a senha dessa conta: os RDOs deste aparelho passam para ela.');
+        }
+      }
+      usarPerfil(perfil);
+      await adotarPendente(p, perfil);
+      toast('Sua conta foi criada no banco. Os RDOs deste aparelho vão subir agora.');
+      redesenhar();
+      return { criada: true };
+    } catch (e) {
+      gravarPendente({ ...p, erro: e.message || 'O banco recusou o cadastro.' });
+      atualizarStatus();
+      return { erro: e.message || 'O banco recusou o cadastro.' };
+    } finally {
+      concluindo = false;
+    }
+  }
 
   /** Manda o link de senha nova para o e-mail da conta (não precisa de código do supervisor). */
   const esqueci = async (email) => {
@@ -166,6 +289,10 @@ window.Conta = (() => {
     const u = Number(localStorage.getItem(chaveDe(CHAVE_ULTIMA))) || 0;
     const hora = u ? new Date(u).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
     const partes = [];
+    if (ehPendente()) {
+      const p = lerPendente();
+      partes.push(p?.erro ? `Conta não foi criada no banco: ${p.erro}` : 'Conta criada só neste aparelho: vai para o banco quando tiver internet');
+    }
     if (fila) partes.push(`${fila} RDO(s) aguardando envio`);
     if (recusados) partes.push(`${recusados} RDO(s) recusado(s) pelo banco`);
     if (!fila && !recusados) partes.push('Tudo enviado ao banco');
@@ -450,6 +577,14 @@ window.Conta = (() => {
     if (sincronizando) {
       pedidoNaFila = true;
       return { ...nada, ocupado: true };
+    }
+    if (ehPendente()) {
+      const r = await concluirCadastroPendente();
+      if (!r.criada) {
+        if (!silencioso && r.erro) toast(r.erro);
+        else if (!silencioso) toast('Sua conta ainda não foi para o banco: falta internet. Os RDOs ficam guardados aqui.');
+        return { ...nada, semRede: Boolean(r.semRede), erro: r.erro, pendente: true };
+      }
     }
     sincronizando = true;
     pedidoNaFila = false;
@@ -914,7 +1049,7 @@ window.Conta = (() => {
           if (!facialRascunho) { mostrarAviso('Tire a foto do rosto antes de criar a conta.'); return; }
           ocupado(botao, true);
           try {
-            await cadastrar({
+            const { semInternet } = await cadastrar({
               nome: root.querySelector('#n-nome').value,
               funcao: root.querySelector('#n-funcao').value,
               email: root.querySelector('#n-email').value.trim(),
@@ -925,7 +1060,9 @@ window.Conta = (() => {
             lembrarEmail(campo('#n-email').value);
             facialRascunho = '';
             aba = 'entrar';
-            toast('Conta criada. Seus RDOs já podem ir para o banco.');
+            toast(semInternet
+              ? 'Conta criada neste aparelho, sem internet. Já pode usar o app: quando o sinal voltar, ela vai para o banco sozinha.'
+              : 'Conta criada. Seus RDOs já podem ir para o banco.');
             irParaInicio();
             sincronizar({ silencioso: true }).catch(() => {});
           } catch (e) { falhar(e, botao); }
@@ -1132,6 +1269,7 @@ window.Conta = (() => {
           <div class="name">${esc(u.nome || 'Sua conta')}</div>
           <div class="sub">${esc(u.funcao ? `${u.funcao} · ` : '')}${esc(u.email || '')}${u.mestre ? ' · conta principal' : ''}</div>
         </div></div>
+        ${ehPendente() ? '<div class="aviso-info">Sua conta foi criada sem internet e ainda não foi para o banco. Se sair, para entrar de novo sem sinal use o mesmo e-mail e a mesma senha, neste aparelho.</div>' : ''}
         ${fila ? `<div class="aviso-info">${fila} RDO(s) deste aparelho ainda não subiram para o banco${semRede ? ' e não há internet agora' : ''}.
           Eles ficam guardados aqui e sobem quando você entrar de novo com esta conta.</div>` : ''}
         <p class="dica">Ao sair, o app volta para a tela de entrar. Nada é apagado: os RDOs desta conta continuam
@@ -1177,6 +1315,8 @@ window.Conta = (() => {
     try {
       Nuvem.aoMudar(async (user) => {
         if (!user) {
+          // conta criada sem internet ainda não existe no banco: o banco não a conhece, e está certo
+          if (ehPendente()) { if (navigator.onLine !== false) sincronizar({ silencioso: true }).catch(() => {}); return; }
           // o banco diz que ninguém está logado (saiu em outra aba, conta removida): sai aqui também
           if (sessao?.usuario?.id) {
             clearTimeout(timer);
@@ -1212,7 +1352,7 @@ window.Conta = (() => {
 
   return {
     iniciar, ativo, usuario, ehMestre,
-    entrar, cadastrar, esqueci, sair,
+    entrar, cadastrar, esqueci, sair, concluirCadastroPendente,
     enviarTudo, sincronizar, agendar, recuperar, apagarNaNuvem,
     pendentes, comErro, statusSync, textoStatus,
     abrirDoBanco,

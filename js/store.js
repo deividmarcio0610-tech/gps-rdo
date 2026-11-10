@@ -603,6 +603,43 @@ window.Store = (() => {
     },
 
     /**
+     * Traz para a conta de agora os RDOs e a equipe guardados com outra conta neste aparelho
+     * (a conta provisória do cadastro feito sem internet) e apaga a cópia antiga. RDO que já
+     * existe aqui fica como está. Devolve quantos RDOs vieram, ou -1 se não coube.
+     */
+    trazerDeConta(origemId) {
+      if (!origemId || !contaId || String(origemId) === contaId) return 0;
+      const chaveOrigem = `${KEY}:${origemId}`;
+      let origem = null;
+      try { origem = JSON.parse(localStorage.getItem(chaveOrigem) || 'null'); } catch { origem = null; }
+      if (!origem) return 0;
+      recarregarSeMudou();
+      const antes = { rdos: db.rdos.slice(), employees: (db.employees || []).slice(), ultimos: { ...(db.ultimos || {}) } };
+      const novos = (Array.isArray(origem.rdos) ? origem.rdos : [])
+        .filter((r) => r && r.id && !db.rdos.some((x) => x.id === r.id))
+        .map((r) => completo(r));
+      db.rdos.push(...novos);
+      db.rdos.sort((a, b) => String(b.number).localeCompare(String(a.number)));
+      const igual = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+      (Array.isArray(origem.employees) ? origem.employees : []).forEach((e) => {
+        if (e?.name && !(db.employees || []).some((x) => igual(x.name, e.name) && igual(x.team, e.team))) {
+          db.employees = db.employees || [];
+          db.employees.push(e);
+        }
+      });
+      Object.entries(origem.ultimos || {}).forEach(([dia, n]) => marcarNumero(`${dia}-${n}`));
+      novos.forEach((r) => marcarNumero(r.number));
+      if (!save()) {
+        db.rdos = antes.rdos;
+        db.employees = antes.employees;
+        db.ultimos = antes.ultimos;
+        return -1;
+      }
+      try { localStorage.removeItem(chaveOrigem); localStorage.removeItem(`${chaveOrigem}:rev`); } catch { /* sobra a cópia */ }
+      return novos.length;
+    },
+
+    /**
      * Anota no RDO algo que só interessa a este aparelho (campos com "_" na frente, que não
      * sobem para o banco). Não mexe no carimbo: a anotação não conta como edição do RDO.
      */

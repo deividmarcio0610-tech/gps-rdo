@@ -81,6 +81,44 @@ window.Fotos = (() => {
     }
   }
 
+  /**
+   * Cadastro feito sem internet (pedido de 10/11/2026): as fotos tiradas com a conta provisória
+   * do aparelho passam para a conta de verdade quando ela é criada no banco. Copia tudo do banco
+   * de fotos da conta `origem` para o desta conta e apaga o de origem.
+   */
+  async function copiarDeConta(origem) {
+    if (!origem || !conta || origem === conta) return 0;
+    await adocao;
+    const nomeOrigem = `${BANCO}:${origem}`;
+    const alvo = nomeBanco();
+    let fonte;
+    try { fonte = await abrirBruto(nomeOrigem); } catch { return 0; }
+    let total = 0;
+    try {
+      const todas = await new Promise((ok, falha) => {
+        const pedido = fonte.transaction(LOJA).objectStore(LOJA).getAll();
+        pedido.onsuccess = () => ok(pedido.result || []);
+        pedido.onerror = () => falha(pedido.error);
+      });
+      if (todas.length) {
+        const destino = await abrirBruto(alvo);
+        try {
+          await new Promise((ok, falha) => {
+            const tx = destino.transaction(LOJA, 'readwrite');
+            const loja = tx.objectStore(LOJA);
+            todas.forEach((f) => loja.put(f));
+            tx.oncomplete = ok;
+            tx.onerror = () => falha(tx.error);
+            tx.onabort = () => falha(tx.error);
+          });
+        } finally { destino.close(); }
+      }
+      total = todas.length;
+    } finally { fonte.close(); }
+    try { indexedDB.deleteDatabase(nomeOrigem); } catch { /* fica sobrando, sem estragar nada */ }
+    return total;
+  }
+
   // cópia das fotos antigas em andamento: quem for ler ou gravar espera ela terminar
   let adocao = Promise.resolve();
 
@@ -239,5 +277,5 @@ window.Fotos = (() => {
     return mudou;
   }
 
-  return { reduzir, encolher, salvar, imagem, remover, migrar, usarConta };
+  return { reduzir, encolher, salvar, imagem, remover, migrar, usarConta, copiarDeConta };
 })();

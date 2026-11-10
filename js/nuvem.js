@@ -140,7 +140,8 @@ window.Nuvem = (() => {
   async function cadastrar({ nome, email, senha, assinatura, funcao, facial }) {
     await iniciar();
     const limpo = String(email || '').trim().toLowerCase();
-    const cred = await auth.createUserWithEmailAndPassword(limpo, senha).catch((e) => { throw falha(e); });
+    // com sinal fraco o pedido fica pendurado: com prazo, o app cai no cadastro sem internet (js/conta.js)
+    const cred = await comPrazo(auth.createUserWithEmailAndPassword(limpo, senha), 25000).catch((e) => { throw falha(e); });
     // os campos vêm um por um de propósito: um "mestre" mandado de fora nunca chega ao documento
     const perfilNovo = {
       nome: String(nome || '').trim(),
@@ -167,8 +168,7 @@ window.Nuvem = (() => {
 
   async function entrar(email, senha) {
     await iniciar();
-    const cred = await auth
-      .signInWithEmailAndPassword(String(email || '').trim().toLowerCase(), senha)
+    const cred = await comPrazo(auth.signInWithEmailAndPassword(String(email || '').trim().toLowerCase(), senha), 25000)
       .catch((e) => { throw falha(e); });
     perfilCache = null;
     return perfil({ recarregar: true }).catch(() => ({
