@@ -93,6 +93,43 @@ window.Screens = (() => {
     return partes ? `${n} RDO(s) em ${partes}` : `${n} RDO(s)`;
   };
 
+  // lista dos RDOs (início e Gerar Relatório): filtrada por data e tipo; sem filtro, os 20 mais recentes
+  const LIMITE_LISTA = 20;
+  function listaRdoHtml(atualId = null) {
+    const achados = filtrar(Store.rdos);
+    const filtrando = filtro.data || filtro.tipo;
+    const mostrados = filtrando ? achados : achados.slice(0, LIMITE_LISTA);
+    if (!achados.length) {
+      return `<div class="empty">${filtrando ? 'Nenhum RDO nesta data/tipo.' : 'Nenhum RDO registrado ainda.'}</div>`;
+    }
+    // quem ainda não subiu para o banco ganha um selo na lista
+    const naFila = new Set((window.Conta?.pendentes?.() || []).map((x) => x.id));
+    return `
+      <div class="contagem">${resumoFiltro(achados.length)}${!filtrando && achados.length > LIMITE_LISTA ? ` · mostrando os ${LIMITE_LISTA} mais recentes` : ''}</div>
+      ${mostrados.map((r) => `
+        <button class="row${r.id === atualId ? ' row-atual' : ''}" data-open="${esc(r.id)}">
+          <div class="grow">
+            <div class="num">RDO ${esc(r.number)}</div>
+            <div class="meta">${fmtDate(r.date)} · ${esc(r.location || 'Sem local')}</div>
+          </div>
+          ${r.id === atualId ? '<span class="badge green">aberto</span>' : ''}
+          ${naFila.has(r.id) ? '<span class="badge amber">aguardando envio</span>' : ''}
+          ${seloTipo(r)}
+          <span class="arrow">${icon('chevron', 16)}</span>
+        </button>`).join('')}`;
+  }
+
+  /** Liga as linhas e o filtro da lista de RDOs; o toque numa linha chama aoAbrir(id). */
+  function ligarListaRdo(root, aoAbrir, atualId = null) {
+    const lista = root.querySelector('#lista-rdo');
+    if (!lista) return;
+    const ligarLinhas = () => lista.querySelectorAll('[data-open]').forEach((b) => {
+      b.addEventListener('click', () => aoAbrir(b.dataset.open));
+    });
+    ligarLinhas();
+    ligarFiltro(root, () => { lista.innerHTML = listaRdoHtml(atualId); ligarLinhas(); });
+  }
+
   // -------------------------------------------------------------- início
 
   function home(rdo) {
@@ -101,30 +138,7 @@ window.Screens = (() => {
       const n = rdo ? (rdo[lista] || []).length : 0;
       return n ? `<span class="badge-count">${n}</span>` : '';
     };
-    // lista dos RDOs: filtrada por data e tipo; sem filtro, os 20 mais recentes
-    const LIMITE = 20;
-    const listaHtml = () => {
-      const achados = filtrar(Store.rdos);
-      const filtrando = filtro.data || filtro.tipo;
-      const mostrados = filtrando ? achados : achados.slice(0, LIMITE);
-      if (!achados.length) {
-        return `<div class="empty">${filtrando ? 'Nenhum RDO nesta data/tipo.' : 'Nenhum RDO registrado ainda.'}</div>`;
-      }
-      // quem ainda não subiu para o banco ganha um selo na lista
-      const naFila = new Set((window.Conta?.pendentes?.() || []).map((x) => x.id));
-      return `
-        <div class="contagem">${resumoFiltro(achados.length)}${!filtrando && achados.length > LIMITE ? ` · mostrando os ${LIMITE} mais recentes` : ''}</div>
-        ${mostrados.map((r) => `
-          <button class="row" data-open="${esc(r.id)}">
-            <div class="grow">
-              <div class="num">RDO ${esc(r.number)}</div>
-              <div class="meta">${fmtDate(r.date)} · ${esc(r.location || 'Sem local')}</div>
-            </div>
-            ${naFila.has(r.id) ? '<span class="badge amber">aguardando envio</span>' : ''}
-            ${seloTipo(r)}
-            <span class="arrow">${icon('chevron', 16)}</span>
-          </button>`).join('')}`;
-    };
+    const listaHtml = () => listaRdoHtml();
 
     return {
       titulo: TITULOS.home,
@@ -191,16 +205,11 @@ window.Screens = (() => {
           app.abrir(novo.id);
           toast(`Novo RDO ${novo.number} criado.`);
         });
-        const lista = root.querySelector('#lista-rdo');
-        const ligarLinhas = () => lista.querySelectorAll('[data-open]').forEach((b) => {
-          b.addEventListener('click', () => {
-            app.abrir(b.dataset.open);
-            const aberto = Store.find(b.dataset.open);
-            if (aberto) toast(`RDO ${aberto.number} aberto.`);
-          });
+        ligarListaRdo(root, (id) => {
+          app.abrir(id);
+          const aberto = Store.find(id);
+          if (aberto) toast(`RDO ${aberto.number} aberto.`);
         });
-        ligarLinhas();
-        ligarFiltro(root, () => { lista.innerHTML = listaHtml(); ligarLinhas(); });
       },
     };
   }
@@ -995,6 +1004,15 @@ window.Screens = (() => {
     return {
       titulo: TITULOS.report,
       html: `
+        <div class="history relatorio-lista">
+          <div class="head">
+            <span class="label">Escolha o RDO</span>
+          </div>
+          ${filtroHtml()}
+          <div id="lista-rdo">${listaRdoHtml(rdo.id)}</div>
+        </div>
+
+        <div class="section-label">RDO ${esc(rdo.number)} · ${fmtDate(rdo.date)}</div>
         <div class="summary">
           <div class="box"><div class="n">${rdo.workforce.length}</div><div class="t">Mão de obra</div></div>
           <div class="box"><div class="n">${rdo.equipmentList.length}</div><div class="t">Equipamentos</div></div>
@@ -1039,6 +1057,14 @@ window.Screens = (() => {
         root.querySelectorAll('[data-go]').forEach((b) => {
           b.addEventListener('click', () => app.go(b.dataset.go));
         });
+
+        // pedido de 09/11/2026: escolher o RDO aqui mesmo; troca o RDO e fica no Gerar Relatório
+        ligarListaRdo(root, (id) => {
+          if (id === rdo.id) return;
+          app.abrir(id);
+          const aberto = Store.find(id);
+          if (aberto) toast(`RDO ${aberto.number} aberto.`);
+        }, rdo.id);
 
         root.querySelector('[data-act="pdf"]').addEventListener('click', async (e) => {
           const btn = e.currentTarget;

@@ -299,6 +299,16 @@ body.dark .action-card .badge-count { background: rgba(255, 255, 255, 0.09); col
 .history .row .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .history .row .arrow { color: var(--text-soft); }
 
+/* RDO aberto na lista: fica marcado no Gerar Relatório */
+.history .row.row-atual {
+  background: var(--green-soft);
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px var(--green);
+}
+
+/* lista de escolha dentro do Gerar Relatório */
+.relatorio-lista { margin-bottom: 14px; }
+
 /* ---------------------------------------------------------------- formulários */
 
 /* min-width: 0 deixa a coluna da grade encolher; sem isso o campo de data do
@@ -857,6 +867,20 @@ footer.brand .rdo { color: var(--blue); }
   border-color: var(--orange);
   color: var(--orange);
   background: var(--surface-2);
+}
+
+/* link de texto dentro do aviso (ex.: "Criar cadastro" abaixo do Entrar) */
+.link-cadastro { text-align: center; margin-top: 10px; }
+
+.link-btn {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 700;
+  color: var(--orange);
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 .assina {

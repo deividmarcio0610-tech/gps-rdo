@@ -475,7 +475,8 @@ window.Conta = (() => {
         <div class="field"><label for="c-senha">Senha</label>
           <input id="c-senha" type="password" autocomplete="current-password" required></div>
         <button class="btn primary block" type="submit">Entrar</button>
-      </form>`;
+      </form>
+      <p class="dica link-cadastro">Não tem conta? <button type="button" class="link-btn" data-aba="criar">Criar cadastro</button></p>`;
   }
 
   function htmlCriar() {
