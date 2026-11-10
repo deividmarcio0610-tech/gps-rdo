@@ -89,8 +89,8 @@ window.Pdf = (() => {
   const PREFIXO_OM = 'Nº OM / TÍTULO / LOCAL / DESCRIÇÃO DETALHADA : ';
   // horários da grade do modelo; valem quando a etapa não tem horário no RDO
   const HORAS_MODELO = window.Store?.HORAS_MODELO || [
-    ['07:45', '08:00'], ['08:00', '08:05'], ['08:05', '08:15'], ['08:15', '09:25'],
-    ['09:25', '09:27'], ['09:27', '09:30'], ['09:30', '15:30'], ['11:00', '12:00'],
+    ['07:30', '07:45'], ['07:45', '07:50'], ['07:50', '08:00'], ['08:00', '09:10'],
+    ['09:10', '09:12'], ['09:12', '09:15'], ['09:15', '16:30'], ['11:00', '12:00'],
   ];
   const OM_POR_FOLHA = 4;
   const PESSOAS_POR_FOLHA = 7;

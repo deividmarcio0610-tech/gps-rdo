@@ -38,13 +38,16 @@ window.Store = (() => {
     'HORÁRIO DE ALMOÇO/JANTA',
   ];
   /*
-   * Horários fixos da grade do modelo "RDO ADM" do cliente (conferidos na planilha, L8:M15).
-   * Desde 10/11/2026 a tela Etapas do Dia já abre com eles; o RDO guarda o que for salvo lá,
-   * e a etapa que ficou em branco vale por estes valores.
+   * Horário fixo das etapas: o horário ADM de todos, das 07:30 às 16:30 (pedido de 10/11/2026;
+   * antes era a grade do modelo do cliente, 07:45 a 15:30). As durações das etapas são as do
+   * modelo; o começo foi para 07:30 e a execução vai até 16:30, com o almoço de 11:00 a 12:00
+   * dentro dela: 9 h no dia, 8 h de trabalho. A tela Etapas do Dia já abre com estes valores, o
+   * RDO guarda o que for salvo lá, e a etapa que ficou em branco vale por eles. A espera por
+   * bloqueio sai do fim da execução (16:30).
    */
   const HORAS_MODELO = [
-    ['07:45', '08:00'], ['08:00', '08:05'], ['08:05', '08:15'], ['08:15', '09:25'],
-    ['09:25', '09:27'], ['09:27', '09:30'], ['09:30', '15:30'], ['11:00', '12:00'],
+    ['07:30', '07:45'], ['07:45', '07:50'], ['07:50', '08:00'], ['08:00', '09:10'],
+    ['09:10', '09:12'], ['09:12', '09:15'], ['09:15', '16:30'], ['11:00', '12:00'],
   ];
   const etapasVazias = () => ETAPAS.map(() => ({ inicio: '', fim: '' }));
 

@@ -319,7 +319,12 @@ body.dark .action-card .badge-count { background: rgba(255, 255, 255, 0.09); col
 
 /* 16px nos campos: com fonte menor o iPhone amplia a página ao tocar no campo
    e não volta sozinho (era o "tamanho de tela errado") */
+/* e-mail e senha estavam fora desta lista: na tela de entrar saíam como campo cru do navegador */
 input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="tel"],
+input[type="search"],
 input[type="date"],
 input[type="time"],
 input[type="number"],
@@ -982,3 +987,51 @@ body.dark .aviso.ok { color: #81c784; }
 .sheet .sheet-opcoes { display: flex; flex-direction: column; gap: 8px; margin-top: 2px; }
 
 body.campo .abas-relatorio .aba { font-size: 15px; padding: 14px 6px; }
+
+
+/* ---------------------------------------------------------------- entrar e cadastro (10/11/2026) */
+
+.conta-form { display: flex; flex-direction: column; gap: 14px; }
+.conta-form input::placeholder { color: var(--text-soft); opacity: 0.7; }
+
+/* senha com o botão Mostrar/Esconder dentro do campo */
+.senha-caixa { position: relative; }
+.senha-caixa input { padding-right: 92px; }
+.ver-senha {
+  position: absolute; top: 50%; right: 6px; transform: translateY(-50%);
+  border: 0; background: transparent; color: var(--orange);
+  font: inherit; font-size: 13px; font-weight: 700;
+  padding: 8px 10px; min-height: 36px; cursor: pointer; border-radius: 8px;
+}
+.ver-senha:active { background: var(--surface-2); }
+
+.esqueci-link { align-self: center; font-size: 13px; padding: 6px 8px; }
+
+/* cadastro em três passos */
+.passo {
+  display: flex; flex-direction: column; gap: 11px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 13px 12px;
+}
+.passo-titulo { display: flex; align-items: center; gap: 9px; font-size: 14px; font-weight: 700; }
+.passo-n {
+  width: 24px; height: 24px; border-radius: 50%; flex: 0 0 auto;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--orange); color: #fff; font-size: 12.5px; font-weight: 800;
+}
+.passo .rosto-img { align-self: center; width: 150px; height: 150px; border-radius: 50%; }
+.passo .dica { margin: 0; }
+
+body.campo .ver-senha { font-size: 15px; }
+
+/* faixa de versão nova pronta (o app espera quem está digitando terminar) */
+.faixa-atualizacao {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  top: calc(64px + env(safe-area-inset-top, 0px)); z-index: 40;
+  width: min(460px, calc(100% - 24px));
+  display: flex; align-items: center; gap: 10px;
+  background: #1f2328; color: #fff; border-radius: 12px; padding: 10px 12px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25); font-size: 13px; line-height: 1.35;
+}
+.faixa-atualizacao span { flex: 1; }
+.faixa-atualizacao .btn { padding: 8px 12px; font-size: 12.5px; flex: 0 0 auto; }

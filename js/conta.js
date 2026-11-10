@@ -713,6 +713,8 @@ window.Conta = (() => {
    * erro (senha curta, e-mail já usado, sem internet) redesenhava tudo e a pessoa perdia o
    * que tinha digitado, a assinatura e a foto.
    */
+  const emailValido = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v || '').trim());
+
   const mostrarAviso = (texto, tipo = 'erro') => {
     aviso = texto;
     avisoTipo = tipo;
@@ -726,7 +728,7 @@ window.Conta = (() => {
 
   const abas = () => `
     <div class="abas">
-      ${[['entrar', 'Entrar'], ['criar', 'Criar conta'], ['esqueci', 'Esqueci a senha']].map(([v, t]) => `
+      ${[['entrar', 'Entrar'], ['criar', 'Criar conta']].map(([v, t]) => `
         <button type="button" class="aba${aba === v ? ' ativa' : ''}" data-aba="${v}">${t}</button>`).join('')}
     </div>`;
 
@@ -736,15 +738,29 @@ window.Conta = (() => {
   const semBanco = () => (Nuvem.configurado() ? ''
     : `<div class="aviso erro">O banco na nuvem ainda não foi ligado neste app. Quem publicou precisa colar a configuração do Firebase (js/firebase-config.js).</div>`);
 
+  // último e-mail que entrou neste aparelho: a tela de entrar já vem com ele
+  const CHAVE_ULTIMO_EMAIL = 'gps_rdo_ultimo_email_v1';
+  const ultimoEmail = () => { try { return localStorage.getItem(CHAVE_ULTIMO_EMAIL) || ''; } catch { return ''; } };
+  const lembrarEmail = (email) => { try { localStorage.setItem(CHAVE_ULTIMO_EMAIL, String(email || '').trim().toLowerCase()); } catch { /* sem espaço */ } };
+
+  /** Campo de senha com o botão de mostrar/esconder (no celular é fácil errar uma letra). */
+  const campoSenha = (id, rotulo, autocomplete, extra = '') => `
+    <div class="field"><label for="${id}">${rotulo}</label>
+      <div class="senha-caixa">
+        <input id="${id}" type="password" autocomplete="${autocomplete}" required${extra}>
+        <button type="button" class="ver-senha" data-ver-senha="${id}" aria-label="Mostrar a senha" aria-pressed="false">Mostrar</button>
+      </div></div>`;
+
   function htmlEntrar() {
     return `
       ${abas()}
-      <form data-form="entrar">
+      <form data-form="entrar" class="conta-form" novalidate>
         <div class="field"><label for="c-email">E-mail</label>
-          <input id="c-email" type="email" autocomplete="username" autocapitalize="off" required></div>
-        <div class="field"><label for="c-senha">Senha</label>
-          <input id="c-senha" type="password" autocomplete="current-password" required></div>
+          <input id="c-email" type="email" inputmode="email" autocomplete="username" autocapitalize="off" spellcheck="false" required
+            placeholder="seu.nome@email.com" value="${esc(ultimoEmail())}"></div>
+        ${campoSenha('c-senha', 'Senha', 'current-password')}
         <button class="btn primary block" type="submit">Entrar</button>
+        <button type="button" class="link-btn esqueci-link" data-aba="esqueci">Esqueci a senha</button>
       </form>
       <p class="dica link-cadastro">Não tem conta? <button type="button" class="link-btn" data-aba="criar">Criar cadastro</button></p>`;
   }
@@ -752,39 +768,45 @@ window.Conta = (() => {
   function htmlCriar() {
     return `
       ${abas()}
-      <form data-form="criar">
-        <div class="field"><label for="n-nome">Nome completo</label>
-          <input id="n-nome" type="text" autocomplete="name" required placeholder="Como assina os RDOs"></div>
-        <div class="field"><label for="n-funcao">Função</label>
-          <input id="n-funcao" type="text" required placeholder="Ex.: Mecânico, Eletricista, Supervisor"></div>
-        <div class="field"><label for="n-email">E-mail</label>
-          <input id="n-email" type="email" autocomplete="email" autocapitalize="off" required></div>
-        <div class="field"><label for="n-senha">Senha (mínimo 6)</label>
-          <input id="n-senha" type="password" autocomplete="new-password" minlength="6" required></div>
-        <div class="field">
-          <label>Assinatura — desenhe com o dedo</label>
+      <form data-form="criar" class="conta-form" novalidate>
+        <p class="dica">Três passos: seus dados, a assinatura e a foto do rosto.</p>
+        <section class="passo">
+          <div class="passo-titulo"><span class="passo-n">1</span>Seus dados</div>
+          <div class="field"><label for="n-nome">Nome completo</label>
+            <input id="n-nome" type="text" autocomplete="name" autocapitalize="words" required placeholder="Como assina os RDOs"></div>
+          <div class="field"><label for="n-funcao">Função</label>
+            <input id="n-funcao" type="text" list="n-funcoes" autocapitalize="sentences" required placeholder="Ex.: Mecânico, Eletricista">
+            <datalist id="n-funcoes">${['Mecânico', 'Eletricista', 'Soldador', 'Caldeireiro', 'Lubrificador', 'Ajudante', 'Técnico', 'Encarregado', 'Supervisor']
+              .map((v) => `<option value="${v}"></option>`).join('')}</datalist></div>
+          <div class="field"><label for="n-email">E-mail</label>
+            <input id="n-email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" required placeholder="seu.nome@email.com"></div>
+          ${campoSenha('n-senha', 'Senha (mínimo 6 letras ou números)', 'new-password', ' minlength="6"')}
+        </section>
+        <section class="passo">
+          <div class="passo-titulo"><span class="passo-n">2</span>Assinatura</div>
           <canvas data-assina data-vazia="1" class="assina" aria-label="Desenhe sua assinatura"></canvas>
           <button type="button" class="btn ghost block" data-act="limpar-assina">${icon('trash', 15)}Limpar assinatura</button>
-          <p class="dica">Assine dentro do quadro, como no papel. A assinatura vai junto com os seus RDOs.</p>
-        </div>
-        <div class="field">
-          <label>Foto do rosto</label>
+          <p class="dica">Assine com o dedo dentro do quadro, como no papel.</p>
+        </section>
+        <section class="passo">
+          <div class="passo-titulo"><span class="passo-n">3</span>Foto do rosto</div>
           <input id="n-facial" type="file" accept="image/*" capture="user" hidden>
-          <button type="button" class="btn ghost block" data-act="facial">${icon('camera', 16)}<span>${facialRascunho ? 'Trocar a foto do rosto' : 'Tirar a foto do rosto'}</span></button>
           <img class="rosto-img" data-facial-preview${facialRascunho ? ` src="${esc(facialRascunho)}"` : ' hidden'} alt="Foto do rosto">
-          <p class="dica">A foto identifica quem preencheu o RDO. Fica guardada só na sua conta e na conta principal;
-            não vai no PDF nem no WhatsApp.</p>
-        </div>
+          <button type="button" class="btn ghost block" data-act="facial">${icon('camera', 16)}<span>${facialRascunho ? 'Trocar a foto do rosto' : 'Tirar a foto do rosto'}</span></button>
+          <p class="dica">Identifica quem preencheu o RDO. Fica só na sua conta e na conta do supervisor; não vai no PDF nem no WhatsApp.</p>
+        </section>
         <button class="btn primary block" type="submit">Criar minha conta</button>
-      </form>`;
+      </form>
+      <p class="dica link-cadastro">Já tem conta? <button type="button" class="link-btn" data-aba="entrar">Entrar</button></p>`;
   }
 
   function htmlEsqueci() {
     return `
       ${abas()}
-      <form data-form="esqueci">
+      <form data-form="esqueci" class="conta-form" novalidate>
         <div class="field"><label for="s-email">E-mail da conta</label>
-          <input id="s-email" type="email" autocapitalize="off" required value="${esc(emailEsqueci)}"></div>
+          <input id="s-email" type="email" inputmode="email" autocomplete="username" autocapitalize="off" spellcheck="false" required
+            placeholder="seu.nome@email.com" value="${esc(emailEsqueci || ultimoEmail())}"></div>
         <button class="btn primary block" type="submit">Mandar o link por e-mail</button>
         <p class="dica">O link chega no e-mail da conta e abre a tela de criar uma senha nova. Não precisa de código do supervisor.</p>
       </form>`;
@@ -860,9 +882,14 @@ window.Conta = (() => {
           const botao = ev.submitter || ev.target.querySelector('[type="submit"]');
           if (botao?.disabled) return;
           mostrarAviso('');
+          const email = root.querySelector('#c-email').value.trim();
+          const senha = root.querySelector('#c-senha').value;
+          if (!emailValido(email)) { mostrarAviso('Digite o e-mail completo, como nome@email.com.'); root.querySelector('#c-email').focus(); return; }
+          if (!senha) { mostrarAviso('Digite a senha.'); root.querySelector('#c-senha').focus(); return; }
           ocupado(botao, true);
           try {
-            await entrar(root.querySelector('#c-email').value.trim(), root.querySelector('#c-senha').value);
+            await entrar(email, senha);
+            lembrarEmail(email);
             toast('Você entrou na sua conta.');
             irParaInicio();
             sincronizar({ silencioso: true }).catch(() => {});
@@ -875,6 +902,14 @@ window.Conta = (() => {
           if (botao?.disabled) return;
           mostrarAviso('');
           const assina = root.__assina;
+          const campo = (id) => root.querySelector(id);
+          const faltando = [
+            [!campo('#n-nome').value.trim(), '#n-nome', 'Digite seu nome completo.'],
+            [!campo('#n-funcao').value.trim(), '#n-funcao', 'Digite a sua função.'],
+            [!emailValido(campo('#n-email').value.trim()), '#n-email', 'Digite o e-mail completo, como nome@email.com.'],
+            [campo('#n-senha').value.length < 6, '#n-senha', 'A senha precisa de pelo menos 6 letras ou números.'],
+          ].find(([erro]) => erro);
+          if (faltando) { mostrarAviso(faltando[2]); campo(faltando[1]).focus(); return; }
           if (!assina || assina.vazia()) { mostrarAviso('Desenhe sua assinatura no quadro antes de criar a conta.'); return; }
           if (!facialRascunho) { mostrarAviso('Tire a foto do rosto antes de criar a conta.'); return; }
           ocupado(botao, true);
@@ -887,6 +922,7 @@ window.Conta = (() => {
               assinatura: assina.png(),
               facial: facialRascunho,
             });
+            lembrarEmail(campo('#n-email').value);
             facialRascunho = '';
             aba = 'entrar';
             toast('Conta criada. Seus RDOs já podem ir para o banco.');
@@ -901,6 +937,7 @@ window.Conta = (() => {
           if (botao?.disabled) return;
           mostrarAviso('');
           emailEsqueci = root.querySelector('#s-email').value.trim();
+          if (!emailValido(emailEsqueci)) { mostrarAviso('Digite o e-mail completo da conta.'); root.querySelector('#s-email').focus(); return; }
           ocupado(botao, true);
           try {
             const texto = await esqueci(emailEsqueci);
@@ -908,6 +945,16 @@ window.Conta = (() => {
             ocupado(botao, false);
           } catch (e) { falhar(e, botao); }
         });
+
+        root.querySelectorAll('[data-ver-senha]').forEach((b) => b.addEventListener('click', () => {
+          const entrada = root.querySelector(`#${b.dataset.verSenha}`);
+          if (!entrada) return;
+          const mostrar = entrada.type === 'password';
+          entrada.type = mostrar ? 'text' : 'password';
+          b.textContent = mostrar ? 'Esconder' : 'Mostrar';
+          b.setAttribute('aria-pressed', String(mostrar));
+          b.setAttribute('aria-label', mostrar ? 'Esconder a senha' : 'Mostrar a senha');
+        }));
 
         root.querySelector('[data-act="limpar-assina"]')?.addEventListener('click', () => root.__assina?.limpar());
         root.__assina = ligarAssinatura(root);

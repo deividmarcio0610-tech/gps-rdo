@@ -351,6 +351,9 @@
 
   render();
 
+  // atualização automática: avisa quando o app acabou de se atualizar e, no APK, oferece a versão nova
+  Pwa.iniciarAvisos?.();
+
   // fotos de versões antigas saem do localStorage (cota de 5 MB) para o IndexedDB
   Fotos.migrar(Store).catch(() => {});
 
