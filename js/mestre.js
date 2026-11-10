@@ -26,16 +26,55 @@ window.Mestre = (() => {
   // "Editar antes de gerar": TST e supervisor entram de segunda a sexta e podem sair num dia
   // em que eles não foram. O ajuste é guardado por dia (AAAA-MM-DD), no aparelho; o dia sem
   // ajuste usa o padrão (os dois ligados, supervisor "Tiago"). Vale para o próximo PDF.
-  const AJUSTE_PADRAO = {
-    tst: true, tstNome: '', supervisor: true, nome: 'Tiago',
-    // bloqueio do dia no RDO final: horas paradas, justificativa e o desconto na etapa 7
-    bloqueioInicio: '', bloqueioFim: '', bloqueioMotivo: '',
+  // (O bloqueio do dia saiu deste painel em 10/11/2026: é lançado em Etapas do Dia, dentro
+  // do RDO, e o desconto na execução é calculado sozinho em Store.contaDoBloqueio.)
+  const AJUSTE_PADRAO = { tst: true, tstNome: '', supervisor: true, nome: 'Tiago' };
+  /*
+   * Pedido de 10/11/2026: o técnico de segurança é posto pelo supervisor e vai fixo, como o
+   * supervisor; no dia em que não foi, tira-se escolhendo o dia. Por isso os NOMES valem para
+   * todo dia até serem trocados (`fixos`) e só o "teve / não teve" é por dia (`dias`). Os dois
+   * ficam guardados no aparelho, por conta: antes sumiam ao fechar o app e o nome do técnico
+   * tinha de ser digitado de novo a cada dia.
+   */
+  const editar = { fixos: {}, dias: {} };
+  const CHAVE_AJUSTE = 'gps_rdo_ajuste_mestre_v1';
+  const chaveAjuste = () => `${CHAVE_AJUSTE}:${window.Conta?.usuario?.()?.id || ''}`;
+  let ajusteDe = null;   // de qual conta são os ajustes que estão na memória
+  function ajustes() {
+    const chave = chaveAjuste();
+    if (ajusteDe !== chave) {
+      ajusteDe = chave;
+      let guardado = {};
+      try { guardado = JSON.parse(localStorage.getItem(chave) || '{}') || {}; } catch { guardado = {}; }
+      editar.fixos = { ...(guardado.fixos || {}) };
+      editar.dias = { ...(guardado.dias || {}) };
+    }
+    return editar;
+  }
+  const gravarAjustes = () => {
+    try { localStorage.setItem(chaveAjuste(), JSON.stringify({ fixos: editar.fixos, dias: editar.dias })); } catch { /* sem espaço: vale só nesta abertura */ }
   };
-  const editar = { dias: {} };
   let painelDia = hoje();
 
-  const ajusteDoDia = (d) => ({ ...AJUSTE_PADRAO, ...(editar.dias[d] || {}) });
-  const guardarAjuste = (d, parcial) => { editar.dias[d] = { ...ajusteDoDia(d), ...parcial }; };
+  const ajusteDoDia = (d) => {
+    const e = ajustes();
+    const doDia = e.dias[d] || {};
+    return { ...AJUSTE_PADRAO, ...e.fixos, tst: doDia.tst !== false, supervisor: doDia.supervisor !== false };
+  };
+  /** "Teve / não teve" de um dia. Dia que volta ao normal (os dois ligados) sai da lista. */
+  const guardarDia = (d, parcial) => {
+    const e = ajustes();
+    const novo = { ...(e.dias[d] || {}), ...parcial };
+    if (novo.tst !== false && novo.supervisor !== false) delete e.dias[d];
+    else e.dias[d] = { tst: novo.tst !== false, supervisor: novo.supervisor !== false };
+    gravarAjustes();
+  };
+  /** Nome que vale para todo dia (supervisor ou técnico de segurança). */
+  const guardarFixo = (parcial) => {
+    const e = ajustes();
+    e.fixos = { ...e.fixos, ...parcial };
+    gravarAjustes();
+  };
 
   const intervalo = () => (modo === 'dia' ? { de: dia, ate: dia } : { de, ate });
   const chaveDe = () => {
@@ -43,29 +82,66 @@ window.Mestre = (() => {
     return `${a}|${b}`;
   };
 
-  async function carregar(app) {
+  /**
+   * Busca os RDOs do intervalo no banco. A lista é relida quando o intervalo muda, quando o
+   * supervisor entra na tela (`aoEntrar`), no botão Atualizar e antes de gerar o PDF. Antes
+   * só relia ao mudar a data: RDO que chegasse depois, ou a correção que ele mesmo acabara
+   * de fazer, não entrava no PDF.
+   */
+  async function carregar(app, { quieto = false } = {}) {
     const chave = chaveDe();
     if (cache.chave === chave || carregando) return;
     carregando = true;
     erro = '';
+    const { de: a, ate: b } = intervalo();
     try {
-      cache = { chave, lista: await Nuvem.todos(intervalo().de, intervalo().ate) };
+      const lista = await Nuvem.todos(a, b);
+      cache = { chave, lista, doServidor: lista.doServidor !== false, em: Date.now() };
     } catch (e) {
       erro = e.message;
-      cache = { chave, lista: [] };
+      cache = { chave, lista: [], doServidor: false, em: 0 };
     }
     carregando = false;
-    app?.render?.();
+    if (!quieto) app?.render?.();
   }
 
-  /** RDO do banco pronto para o PDF: o JSON mais as fotos baixadas na hora. */
+  /** O supervisor chegou na tela: a lista do banco é relida (não a cada redesenho da tela). */
+  function aoEntrar(tela) {
+    if (tela === 'equipe' && !carregando) cache = { ...cache, chave: '' };
+    if (tela === 'controle' && !carregandoCtl) ctl = { ...ctl, chave: '' };
+  }
+
+  /** Sai da conta: lista, PDF montado e ajustes do dia não ficam para quem entrar depois. */
+  function limpar() {
+    cache = { chave: '', lista: [] };
+    ctl = { chave: '', usuarios: [], rdos: [] };
+    pronto = null;
+    erro = '';
+    erroCtl = '';
+    // só a memória: os ajustes guardados no aparelho são da conta e voltam quando ela entrar
+    editar.fixos = {};
+    editar.dias = {};
+    ajusteDe = null;
+  }
+
+  /**
+   * RDO do banco pronto para o PDF: o JSON mais as fotos baixadas na hora. Cada imagem vai
+   * para a foto da posição dela; a lista de fotos do RDO é quem manda (imagem a mais no
+   * banco não entra, foto sem imagem aparece como indisponível, com a legenda certa).
+   */
   async function paraPdf(registro) {
     const rdo = { stoppages: [], ...registro.json };
     const metas = Array.isArray(rdo.photos) ? rdo.photos : [];
-    const imagens = await Nuvem.fotosDe(registro.docId).catch(() => []);
-    if (imagens.length) {
-      rdo.photos = imagens.map((dados, i) => ({ ...(metas[i] || {}), data: dados }));
-    }
+    if (!metas.length) return rdo;
+    const imagens = await Nuvem.fotosDe(registro.docId);
+    rdo.photos = metas.map((meta, i) => {
+      const foto = { ...meta };
+      // o id guardado é do aparelho de quem tirou a foto: aqui só vale a imagem que veio do banco
+      delete foto.foto;
+      delete foto.data;
+      if (imagens[i]) foto.data = imagens[i];
+      return foto;
+    });
     return rdo;
   }
 
@@ -87,10 +163,25 @@ window.Mestre = (() => {
     }));
     const tudo = (campo) => lista.flatMap((r) => (Array.isArray(r[campo]) ? r[campo] : []));
     const notas = lista.map((r) => String(r.notes || '').trim()).filter(Boolean);
+    // Bloqueio (lançado em Etapas do Dia, dentro de cada RDO): a folha tem uma linha 9 só.
+    // Vale o do primeiro RDO que tiver, JUNTO com as etapas desse mesmo RDO, para a conta
+    // do desconto bater com as horas de quem lançou. Bloqueio de outro RDO do dia não some:
+    // entra como frase nas observações.
+    const comBloqueio = lista.filter((r) => Store.bloqueioDoRdo(r));
+    const dono = comBloqueio[0] || null;
+    const contaDoDono = dono ? Store.bloqueioDoRdo(dono) : null;
+    comBloqueio.slice(1).forEach((r) => {
+      const conta = Store.bloqueioDoRdo(r);
+      // a mesma parada lançada por duas equipes é uma parada só: não entra de novo
+      if (conta.inicio === contaDoDono.inicio && conta.fim === contaDoDono.fim) return;
+      notas.push(`RDO ${r.number}: ${Store.fraseDoBloqueio(conta)}`);
+    });
     return {
       ...base,
       date: data || base.date,
       shift: turnos.join(' / '),
+      etapas: (dono || base).etapas,
+      bloqueio: dono ? dono.bloqueio : null,
       workforce: pessoas,
       tasks: tudo('tasks'),
       occurrences: tudo('occurrences'),
@@ -104,17 +195,31 @@ window.Mestre = (() => {
 
   async function gerar(app) {
     if (gerando) return;
-    const lista = cache.lista.slice();
-    if (!lista.length) { toast('Nenhum RDO neste intervalo.'); return; }
+    if (!cache.lista.length) { toast('Nenhum RDO neste intervalo.'); return; }
     gerando = true;
-    avisoGerar = '';
+    avisoGerar = 'Conferindo o banco...';
     app?.render?.();
     try {
+      // O PDF sai do que está no banco AGORA: primeiro sobe a correção que acabou de ser feita
+      // neste aparelho, depois relê a lista. Antes saía da lista lida ao abrir a tela.
+      if (navigator.onLine !== false) {
+        await window.Conta?.sincronizar?.({ silencioso: true, completo: false }).catch(() => {});
+        cache = { ...cache, chave: '' };
+        await carregar(app, { quieto: true });
+        if (erro) throw new Error(erro);
+      }
+      const lista = cache.lista.slice();
+      if (!lista.length) throw new Error('Nenhum RDO neste intervalo.');
       const rdos = [];
       for (let i = 0; i < lista.length; i += 1) {
         avisoGerar = `Baixando as fotos do RDO ${lista[i].json.number} (${i + 1} de ${lista.length})...`;
         app?.render?.();
-        rdos.push(await paraPdf(lista[i]));
+        try {
+          rdos.push(await paraPdf(lista[i]));
+        } catch {
+          // PDF final sem as fotos de um RDO, sem avisar, é pior do que não gerar
+          throw new Error(`Não foi possível baixar as fotos do RDO ${lista[i].json.number}. Tente de novo com sinal melhor.`);
+        }
       }
       avisoGerar = 'Montando o PDF...';
       app?.render?.();
@@ -125,28 +230,16 @@ window.Mestre = (() => {
       const ajustados = paraPdfFinal.map((r) => {
         // cada folha usa o ajuste do dia dela (importa no PDF por período)
         const a = ajusteDoDia(r.date);
-        // bloqueio do dia: a linha 9 do PDF, o desconto no fim da execução e a observação
-        const parado = Store.minutosParada({ start: a.bloqueioInicio, end: a.bloqueioFim });
-        const etapas = (Array.isArray(r.etapas) ? r.etapas : []).map((e) => ({ ...e }));
-        if (parado > 0) {
-          const inicio = etapas[6]?.inicio || Store.HORAS_MODELO[6][0];
-          const fim = etapas[6]?.fim || Store.HORAS_MODELO[6][1];
-          const iniMin = Store.minutosDe(inicio) ?? 0;
-          etapas[6] = { inicio, fim: Store.hhmmDe(Math.max(iniMin, (Store.minutosDe(fim) ?? iniMin) - parado)) };
-        }
-        const textoBloqueio = parado > 0
-          ? `Parado por espera no bloqueio das ${a.bloqueioInicio} às ${a.bloqueioFim} (${Store.fmtHoras(parado)})${a.bloqueioMotivo ? ` — ${a.bloqueioMotivo}` : ''}.`
-          : '';
-        const notes = [String(r.notes || '').trim(), textoBloqueio].filter(Boolean).join('\n');
+        // O bloqueio vem de dentro do RDO (Etapas do Dia). A linha 9, o desconto no fim da
+        // execução e a frase da observação são feitos pelo PDF, uma vez só (js/pdf.js).
         return {
           ...r,
-          etapas,
-          notes,
-          bloqueio: parado > 0 ? { inicio: a.bloqueioInicio, fim: a.bloqueioFim, motivo: a.bloqueioMotivo } : null,
           semTstPadrao: !a.tst,
           semSupervisorPadrao: !a.supervisor,
           supervisor: a.supervisor ? (String(r.supervisor || '').trim() || a.nome) : '',
-          tst: a.tst ? (String(r.tst || '').trim() || a.tstNome) : '',
+          // o nome do painel vence: o técnico é posto pelo supervisor, e RDO antigo pode ter um
+          // nome digitado no cabeçalho (campo que não existe mais) sem ter onde corrigir
+          tst: a.tst ? (a.tstNome || String(r.tst || '').trim()) : '',
         };
       });
       const { doc } = await Pdf.montarVarios(ajustados, { nome, titulo });
@@ -218,6 +311,9 @@ window.Mestre = (() => {
             <input id="e-ate" type="date" value="${esc(ate)}"></div>`}
 
         <div class="section-label">RDOs no banco${cache.lista.length ? ` · ${cache.lista.length}` : ''}</div>
+        <button class="btn ghost" data-act="atualizar-lista" style="font-size:12.5px"${carregando ? ' disabled' : ''}>${icon('refresh', 15)}Atualizar a lista</button>
+        ${cache.doServidor === false && !carregando && !erro
+          ? '<div class="aviso erro">Sem sinal: esta é a última lista que o aparelho guardou e pode estar desatualizada.</div>' : ''}
         <div id="lista-equipe">${listaHtml()}</div>
 
         <div class="card"><div class="body" style="display:grid;gap:8px">
@@ -228,19 +324,15 @@ window.Mestre = (() => {
             <input type="checkbox" data-op="tst"${ajusteDoDia(painelDia).tst ? ' checked' : ''}> Técnico de Segurança neste dia
           </label>
           <div class="field"><label for="e-tst">Nome do técnico de segurança</label>
-            <input id="e-tst" type="text" value="${esc(ajusteDoDia(painelDia).tstNome)}" placeholder="Em branco: usa o nome do RDO"${ajusteDoDia(painelDia).tst ? '' : ' disabled'}></div>
+            <input id="e-tst" type="text" value="${esc(ajusteDoDia(painelDia).tstNome)}" placeholder="Fica guardado para os próximos dias"${ajusteDoDia(painelDia).tst ? '' : ' disabled'}></div>
           <label style="display:flex;align-items:center;gap:8px;font-size:13px">
             <input type="checkbox" data-op="supervisor"${ajusteDoDia(painelDia).supervisor ? ' checked' : ''}> Supervisor neste dia
           </label>
           <div class="field"><label for="e-supervisor">Nome do supervisor</label>
             <input id="e-supervisor" type="text" value="${esc(ajusteDoDia(painelDia).nome)}"${ajusteDoDia(painelDia).supervisor ? '' : ' disabled'}></div>
-          <div class="field"><label for="e-bloqueio-ini">Bloqueio: início</label>
-            <input id="e-bloqueio-ini" type="time" value="${esc(ajusteDoDia(painelDia).bloqueioInicio)}"></div>
-          <div class="field"><label for="e-bloqueio-fim">Bloqueio: fim</label>
-            <input id="e-bloqueio-fim" type="time" value="${esc(ajusteDoDia(painelDia).bloqueioFim)}"></div>
-          <div class="field"><label for="e-bloqueio-motivo">Justificativa do bloqueio</label>
-            <input id="e-bloqueio-motivo" type="text" value="${esc(ajusteDoDia(painelDia).bloqueioMotivo)}" placeholder="Ex.: aguardando liberação da área"></div>
-          <p class="dica">Escolha o dia e deixe marcado só o que teve naquele dia. O ajuste fica guardado por dia. Com o bloqueio preenchido, as horas saem do fim da etapa 7 e a frase entra na observação.</p>
+          <p class="dica">O técnico de segurança e o supervisor já entram sozinhos no RDO Final, de segunda a sexta, com os nomes acima (os nomes ficam guardados).
+            No dia em que um deles não foi, escolha o dia e desmarque: vale só para aquele dia.
+            O bloqueio agora é lançado em <strong>Etapas do Dia</strong>, dentro do RDO (toque no RDO na lista acima): o tempo parado sai sozinho do fim da execução.</p>
         </div></div>
 
         <button class="btn primary block" data-act="gerar"${cache.lista.length && !gerando ? '' : ' disabled'}>
@@ -278,6 +370,12 @@ window.Mestre = (() => {
           app.render();
         });
 
+        root.querySelector('[data-act="atualizar-lista"]')?.addEventListener('click', () => {
+          cache = { ...cache, chave: '' };
+          pronto = null;
+          app.render();
+        });
+
         root.querySelectorAll('[data-abrir]').forEach((b) => b.addEventListener('click', async () => {
           const item = cache.lista.find((x) => x.docId === b.dataset.abrir);
           if (!item) return;
@@ -297,36 +395,20 @@ window.Mestre = (() => {
           app.render();
         });
         root.querySelectorAll('[data-op]').forEach((b) => b.addEventListener('change', () => {
-          guardarAjuste(painelDia, { [b.dataset.op]: b.checked });
+          guardarDia(painelDia, { [b.dataset.op]: b.checked });
           pronto = null;
           app.render();
         }));
         root.querySelector('#e-tst')?.addEventListener('change', (e) => {
-          guardarAjuste(painelDia, { tstNome: String(e.target.value || '').trim() });
+          guardarFixo({ tstNome: String(e.target.value || '').trim() });
           pronto = null;
           app.render();
         });
         root.querySelector('#e-supervisor')?.addEventListener('change', (e) => {
-          guardarAjuste(painelDia, { nome: String(e.target.value || '').trim() || 'Tiago' });
+          guardarFixo({ nome: String(e.target.value || '').trim() || 'Tiago' });
           pronto = null;
           app.render();
         });
-        root.querySelector('#e-bloqueio-ini')?.addEventListener('change', (e) => {
-          guardarAjuste(painelDia, { bloqueioInicio: String(e.target.value || '') });
-          pronto = null;
-          app.render();
-        });
-        root.querySelector('#e-bloqueio-fim')?.addEventListener('change', (e) => {
-          guardarAjuste(painelDia, { bloqueioFim: String(e.target.value || '') });
-          pronto = null;
-          app.render();
-        });
-        root.querySelector('#e-bloqueio-motivo')?.addEventListener('change', (e) => {
-          guardarAjuste(painelDia, { bloqueioMotivo: String(e.target.value || '').trim() });
-          pronto = null;
-          app.render();
-        });
-
         root.querySelector('[data-act="gerar"]')?.addEventListener('click', () => gerar(app));
 
         const tituloPdf = modo === 'dia' ? `RDO ${fmtDate(dia)}` : `RDOs de ${fmtDate(de)} a ${fmtDate(ate)}`;
@@ -426,6 +508,23 @@ window.Mestre = (() => {
     app?.render?.();
   }
 
+  /**
+   * O RDO tem alguma coisa lançada? RDO em branco não conta como feito: entrar numa seção
+   * (e, até a v28, só abrir o app) já cria um RDO vazio com a data do dia, que sobe para o
+   * banco e deixava a pessoa verde sem ela ter preenchido nada.
+   */
+  function temConteudo(j) {
+    if (!j) return false;
+    if (['workforce', 'equipmentList', 'tasks', 'occurrences', 'photos', 'stoppages'].some((k) => Array.isArray(j[k]) && j[k].length)) return true;
+    // etapa igual ao horário fixo do modelo não conta: a tela já abre com ele, e só tocar em
+    // Salvar Etapas não é preencher o RDO
+    if ((Array.isArray(j.etapas) ? j.etapas : []).some((e, i) => e && (e.inicio || e.fim)
+      && (e.inicio !== Store.HORAS_MODELO[i]?.[0] || e.fim !== Store.HORAS_MODELO[i]?.[1]))) return true;
+    if (j.bloqueio && (j.bloqueio.inicio || j.bloqueio.fim)) return true;
+    return ['location', 'notes', 'supervisor', 'tst', 'maintenanceType', 'shift', 'weather', 'startTime', 'endTime', 'cliente', 'complexo', 'gerencia', 'equipeCoord']
+      .some((k) => String(j[k] || '').trim());
+  }
+
   /** Cada conta (sem a do supervisor) com os RDOs dela no dia; quem mandou e saiu da lista também aparece. */
   function situacao() {
     const porDono = new Map();
@@ -433,21 +532,23 @@ window.Mestre = (() => {
       if (!porDono.has(r.dono)) porDono.set(r.dono, []);
       porDono.get(r.dono).push(r);
     });
-    const pessoas = ctl.usuarios.filter((u) => !u.mestre).map((u) => ({ ...u, rdos: porDono.get(u.id) || [] }));
+    const comRdos = (u, rdos) => ({ ...u, rdos, preenchidos: rdos.filter((r) => temConteudo(r.json)) });
+    const pessoas = ctl.usuarios.filter((u) => !u.mestre).map((u) => comRdos(u, porDono.get(u.id) || []));
     const conhecidos = new Set(ctl.usuarios.map((u) => u.id));
     porDono.forEach((rdos, dono) => {
       if (conhecidos.has(dono)) return;
-      pessoas.push({ id: dono, nome: rdos[0].nome || rdos[0].email || 'sem nome', email: rdos[0].email || '', funcao: '', rdos });
+      pessoas.push(comRdos({ id: dono, nome: rdos[0].nome || rdos[0].email || 'sem nome', email: rdos[0].email || '', funcao: '' }, rdos));
     });
     const porNome = (a, b) => a.nome.localeCompare(b.nome, 'pt-BR');
     return {
-      fez: pessoas.filter((p) => p.rdos.length).sort(porNome),
-      naoFez: pessoas.filter((p) => !p.rdos.length).sort(porNome),
+      fez: pessoas.filter((p) => p.preenchidos.length).sort(porNome),
+      naoFez: pessoas.filter((p) => !p.preenchidos.length).sort(porNome),
     };
   }
 
   function pessoaHtml(p, fez) {
-    const sub = [p.funcao, p.email].filter(Boolean).map(esc).join(' · ');
+    const sub = [p.funcao, p.email].filter(Boolean).map(esc).join(' · ')
+      + (!fez && p.rdos.length ? `${p.funcao || p.email ? ' · ' : ''}só RDO em branco no dia` : '');
     const rdos = p.rdos.map((r) => `
       <button class="btn ghost" data-abrir-ctl="${esc(r.docId)}" style="padding:4px 10px;font-size:12px">
         RDO ${esc(r.json.number)}${r.json.status === 'final' ? ' · finalizado' : ''}</button>`).join('');
@@ -492,7 +593,7 @@ window.Mestre = (() => {
         <button class="btn ghost" data-act="ctl-atualizar" style="font-size:12.5px">Atualizar</button>
         <div class="section-label">${fmtDate(diaCtl)}</div>
         ${corpo}
-        <p class="dica">Verde: a pessoa tem RDO com a data escolhida no banco. Vermelho: não tem. RDO feito sem internet só conta depois que subir.</p>`,
+        <p class="dica">Verde: a pessoa tem RDO preenchido com a data escolhida no banco. Vermelho: não tem, ou só tem RDO em branco. RDO feito sem internet só conta depois que subir.</p>`,
       bind(root) {
         root.querySelector('#ctl-dia')?.addEventListener('change', (e) => {
           if (!e.target.value) return;
@@ -518,5 +619,5 @@ window.Mestre = (() => {
     };
   }
 
-  return { tela, controle };
+  return { tela, controle, aoEntrar, limpar, juntarDoDia, ajusteDoDia, guardarDia, guardarFixo, temConteudo };
 })();

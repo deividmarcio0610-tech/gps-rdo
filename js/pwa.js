@@ -36,10 +36,29 @@ window.Pwa = (() => {
     // não ficar mostrando a versão velha até a próxima abertura. Na primeira instalação não.
     const tinhaVersao = Boolean(navigator.serviceWorker.controller);
     let recarregou = false;
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (!tinhaVersao || recarregou) return;
+    // Recarregar apaga o que está digitado e não foi salvo (uma observação longa, o cadastro
+    // com a assinatura desenhada). Se a pessoa está no meio disso, a troca espera ela terminar.
+    const emUso = () => {
+      if (document.querySelector('.scrim')) return true;
+      const foco = document.activeElement;
+      if (foco && /^(INPUT|TEXTAREA|SELECT)$/.test(foco.tagName)) return true;
+      // cabeçalho e etapas só gravam no botão Salvar: enquanto a tela está aberta, espera
+      if (document.querySelector('#screen fieldset.campos:not([disabled])')) return true;
+      // tela de entrar/cadastro: só segura se já há algo digitado ou a assinatura desenhada
+      const form = document.querySelector('#screen form[data-form]');
+      if (!form) return false;
+      return [...form.querySelectorAll('input')].some((i) => i.type !== 'file' && i.value)
+        || Boolean(form.querySelector('canvas[data-vazia="0"]'));
+    };
+    const recarregarQuandoDer = () => {
+      if (recarregou) return;
+      if (emUso()) { setTimeout(recarregarQuandoDer, 3000); return; }
       recarregou = true;
       location.reload();
+    };
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!tinhaVersao || recarregou) return;
+      recarregarQuandoDer();
     });
 
     window.addEventListener('load', () => {
@@ -127,8 +146,22 @@ window.Pwa = (() => {
     } catch { return null; }
   }
 
+  /**
+   * Qual publicação do site está guardada neste aparelho ("v30"). O número do app (1.7) só
+   * muda junto com o APK; este muda a cada publicação, e é ele que mostra se a atualização chegou.
+   */
+  async function versaoDoSite() {
+    try {
+      const numeros = (await caches.keys())
+        .map((nome) => /^gps-rdo-v(\d+)$/.exec(nome))
+        .filter(Boolean)
+        .map((m) => Number(m[1]));
+      return numeros.length ? `v${Math.max(...numeros)}` : '';
+    } catch { return ''; }
+  }
+
   return {
     registrar, escutarConvite, podeInstalar, instalar, aoMudar, instalado, ehIOS, ehAndroid,
-    checarAtualizacao, versao: () => VERSAO_APP, apkUrl: APK_URL, versaoNovaDoApk,
+    checarAtualizacao, versao: () => VERSAO_APP, apkUrl: APK_URL, versaoNovaDoApk, versaoDoSite,
   };
 })();

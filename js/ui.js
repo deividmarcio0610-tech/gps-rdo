@@ -31,6 +31,8 @@ window.UI = (() => {
     whatsapp: '<path d="M12 2a10 10 0 0 0-8.6 15L2 22l5.2-1.4A10 10 0 1 0 12 2Z"/><path d="M8.5 8.2c.2-.4.3-.5.6-.5h.5c.2 0 .4 0 .5.4l.7 1.6c.1.2 0 .4-.1.5l-.4.4c-.1.2-.3.3-.1.6a8 8 0 0 0 3.2 2.8c.3.1.4 0 .6-.1l.5-.6c.2-.2.3-.2.5-.1l1.6.8c.3.1.4.2.4.3 0 .2 0 .9-.4 1.4-.4.5-1 .8-1.5.8-1.5 0-3.7-.9-5.2-2.4s-2.4-3.6-2.4-5.1c0-.6.3-1.2.5-1.4Z"/>',
     copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
     install: '<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2"/>',
+    sair: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5M21 12H9"/>',
+    refresh: '<path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>',
   };
 
   function icon(name, size = 26) {
@@ -39,10 +41,11 @@ window.UI = (() => {
 
   const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+  // Só data de verdade vira dd/mm/aaaa. O resultado entra direto no HTML das telas, então
+  // um RDO vindo do banco com outra coisa no campo da data não pode sair cru daqui.
   const fmtDate = (iso) => {
-    if (!iso) return '—';
-    const [a, m, d] = String(iso).slice(0, 10).split('-');
-    return a ? `${d}/${m}/${a}` : String(iso);
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso ?? ''));
+    return m ? `${m[3]}/${m[2]}/${m[1]}` : '—';
   };
 
   const fmtTime = (iso) => {
@@ -66,6 +69,17 @@ window.UI = (() => {
     [...abertas].forEach((cancelar) => cancelar());
     return true;
   }
+
+  /**
+   * Folha montada fora daqui (ex.: o quadro de assinatura) entra na mesma lista, para o
+   * voltar do aparelho fechá-la em vez de trocar a tela por baixo. Devolve como tirar da lista.
+   */
+  function registrarFolha(cancelar) {
+    abertas.add(cancelar);
+    return () => abertas.delete(cancelar);
+  }
+
+  const haFolhaAberta = () => abertas.size > 0;
 
   let toastTimer = null;
   function toast(msg) {
@@ -113,7 +127,11 @@ window.UI = (() => {
           return `<div class="field"><label for="${id}">${esc(f.label)}</label><textarea id="${id}" data-key="${esc(f.key)}" data-ditado placeholder="${esc(f.placeholder || '')}">${esc(f.value ?? '')}</textarea></div>`;
         }
         const tipo = f.type || 'text';
-        const extra = tipo === 'number' ? ' min="0" max="100" step="1" inputmode="numeric"' : '';
+        // número: aceita decimal e não tem teto, salvo quando o campo pede (min, max, step).
+        // Antes todo número saía com max=100 e teclado sem vírgula: o horímetro não aceitava 1234,5.
+        const extra = tipo === 'number'
+          ? ` min="${Number(f.min ?? 0)}"${f.max != null ? ` max="${Number(f.max)}"` : ''} step="${f.step ?? 'any'}" inputmode="${f.step === 1 ? 'numeric' : 'decimal'}"`
+          : '';
         return `<div class="field"><label for="${id}">${esc(f.label)}</label><input id="${id}" data-key="${esc(f.key)}" type="${tipo}" value="${esc(f.value ?? '')}" placeholder="${esc(f.placeholder || '')}"${extra}${f.readonly ? ' readonly' : ''}></div>`;
       }).join('');
 
@@ -184,6 +202,36 @@ window.UI = (() => {
         const act = e.target.closest('[data-act]')?.dataset.act;
         if (act === 'nao') fechar(false);
         if (act === 'sim') fechar(true);
+      });
+      document.body.appendChild(scrim);
+    });
+  }
+
+  /**
+   * Pergunta com mais de uma saída (ex.: tirar só deste aparelho ou apagar do banco também).
+   * `opcoes`: [{ valor, rotulo, classe }]. Resolve com o valor escolhido ou null se cancelar.
+   */
+  function escolher(titulo, texto, opcoes) {
+    return new Promise((resolve) => {
+      const scrim = document.createElement('div');
+      scrim.className = 'scrim';
+      scrim.innerHTML = `
+        <div class="sheet" role="dialog" aria-modal="true">
+          <h2>${esc(titulo)}</h2>
+          <div style="font-size:13px;line-height:1.5;color:var(--text-soft)">${esc(texto)}</div>
+          <div class="sheet-opcoes">
+            ${(opcoes || []).map((o, i) => `<button class="btn ${esc(o.classe || 'ghost')} block" data-opcao="${i}">${esc(o.rotulo)}</button>`).join('')}
+            <button class="btn ghost block" data-act="nao">Cancelar</button>
+          </div>
+        </div>`;
+      const cancelar = () => fechar(null);
+      const fechar = (valor) => { abertas.delete(cancelar); scrim.remove(); resolve(valor); };
+      abertas.add(cancelar);
+      scrim.addEventListener('click', (e) => {
+        if (e.target === scrim) { fechar(null); return; }
+        if (e.target.closest('[data-act="nao"]')) { fechar(null); return; }
+        const escolhida = e.target.closest('[data-opcao]');
+        if (escolhida) fechar(opcoes[Number(escolhida.dataset.opcao)].valor);
       });
       document.body.appendChild(scrim);
     });
@@ -317,5 +365,9 @@ window.UI = (() => {
     });
   }
 
-  return { icon, esc, fmtDate, fmtTime, nowTime, toast, sheet, confirmar, fecharFolhas, baixar, blobParaBase64, entregarArquivo, botaoArquivo, ligarDitado };
+  return {
+    icon, esc, fmtDate, fmtTime, nowTime, toast, sheet, confirmar, escolher,
+    fecharFolhas, registrarFolha, haFolhaAberta,
+    baixar, blobParaBase64, entregarArquivo, botaoArquivo, ligarDitado,
+  };
 })();

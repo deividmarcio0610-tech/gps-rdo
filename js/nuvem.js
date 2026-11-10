@@ -51,7 +51,7 @@ window.Nuvem = (() => {
   const falha = (e) => {
     const erro = new Error(traduzir(e));
     // quem chama (js/conta.js) separa falha de rede de falha que não adianta repetir
-    erro.codigo = String(e?.code || '');
+    erro.codigo = String(e?.code || e?.codigo || '');
     return erro;
   };
 
@@ -76,8 +76,30 @@ window.Nuvem = (() => {
 
   const atual = () => auth?.currentUser || null;
 
+  /**
+   * Prazo para uma conversa com o banco. Com sinal fraco (o celular diz que tem rede, mas
+   * nada passa) a gravação do Firestore fica esperando para sempre e a sincronização
+   * travava junto. Estourou o prazo: conta como falha de rede e a fila tenta de novo depois.
+   */
+  function comPrazo(promessa, ms = 45000) {
+    let relogio = null;
+    const estouro = new Promise((_, rejeitar) => {
+      relogio = setTimeout(() => {
+        const erro = new Error('O banco demorou para responder. Tente de novo com sinal melhor.');
+        erro.codigo = 'deadline-exceeded';
+        rejeitar(erro);
+      }, ms);
+    });
+    return Promise.race([promessa, estouro]).finally(() => clearTimeout(relogio));
+  }
+
+  /**
+   * Avisa quando o banco diz quem está logado. Se o banco nem conseguiu abrir (biblioteca
+   * que não carregou, aparelho sem armazenamento), ninguém é avisado: antes isso chegava
+   * como "ninguém logado" e derrubava a sessão guardada, justo quando não dava para entrar.
+   */
   function aoMudar(cb) {
-    iniciar().then(() => auth.onAuthStateChanged(cb)).catch(() => cb(null));
+    iniciar().then(() => auth.onAuthStateChanged(cb)).catch(() => {});
   }
 
   const docUsuario = (uid) => db.collection('usuarios').doc(uid);
@@ -89,8 +111,16 @@ window.Nuvem = (() => {
     await iniciar();
     const u = atual();
     if (!u) return null;
-    if (perfilCache && !recarregar) return perfilCache;
-    const d = await docUsuario(u.uid).get().catch(() => null);
+    if (perfilCache && perfilCache.id === u.uid && !recarregar) return perfilCache;
+    let d = null;
+    try {
+      d = await comPrazo(docUsuario(u.uid).get(), 20000);
+    } catch (e) {
+      // não deu para ler agora (sem sinal): vale o que já se sabia. Antes a falha virava um
+      // perfil vazio, que apagava nome, função, assinatura e foto guardados no aparelho.
+      if (perfilCache && perfilCache.id === u.uid) return perfilCache;
+      throw falha(e);
+    }
     const dados = d?.data?.() || {};
     const email = String(u.email || dados.email || '').toLowerCase();
     perfilCache = {
@@ -121,7 +151,14 @@ window.Nuvem = (() => {
       mestre: limpo === MESTRE && cred.user.emailVerified === true,
       criado: Date.now(),
     };
-    await docUsuario(cred.user.uid).set(perfilNovo);
+    try {
+      await comPrazo(docUsuario(cred.user.uid).set(perfilNovo), 30000);
+    } catch (e) {
+      // o perfil não gravou: desfaz o login criado, senão o e-mail ficava preso numa conta
+      // sem nome, função, assinatura nem foto, e a pessoa não conseguia cadastrar de novo
+      try { await cred.user.delete(); } catch { try { await auth.signOut(); } catch { /* fica para a próxima */ } }
+      throw falha(e);
+    }
     perfilCache = { id: cred.user.uid, ...perfilNovo };
     try { await cred.user.updateProfile({ displayName: perfilNovo.nome }); } catch { /* só o nome de exibição */ }
     if (limpo === MESTRE && !cred.user.emailVerified) await cred.user.sendEmailVerification();
@@ -177,8 +214,9 @@ window.Nuvem = (() => {
     await iniciar();
     const u = atual();
     if (!u) throw new Error('Entre na sua conta.');
-    await docUsuario(u.uid).set(campos, { merge: true });
-    perfilCache = null;
+    await comPrazo(docUsuario(u.uid).set(campos, { merge: true }), 30000).catch((e) => { throw falha(e); });
+    // já gravou: se a releitura falhar por falta de sinal, vale o que acabou de ser salvo
+    if (perfilCache && perfilCache.id === u.uid) perfilCache = { ...perfilCache, ...campos };
     return perfil({ recarregar: true });
   }
 
@@ -191,7 +229,7 @@ window.Nuvem = (() => {
     const copia = JSON.parse(JSON.stringify(rdo));
     (copia.photos || []).forEach((p) => { delete p.data; });
     // campos só deste aparelho/uso do supervisor não sobem
-    ['_docId', '_donoNome', '_baixado'].forEach((k) => delete copia[k]);
+    ['_docId', '_donoNome', '_baixado', '_fora'].forEach((k) => delete copia[k]);
     return copia;
   }
 
@@ -200,7 +238,6 @@ window.Nuvem = (() => {
       dono,
       email: info?.email || '',
       nome: info?.nome || '',
-      assinatura: info?.assinatura || '',
       number: String(rdo.number || ''),
       date: String(rdo.date || ''),
       status: rdo.status || 'draft',
@@ -209,34 +246,76 @@ window.Nuvem = (() => {
     };
   }
 
-  /** Fotos que ainda não subiram deste RDO neste aparelho (evita reenviar 300 KB toda vez). */
+  /*
+   * Quais fotos de cada RDO já estão no banco, por posição: docId → [id da foto no aparelho].
+   * Serve para subir só a foto nova, e não todas de novo a cada mudança (300 KB cada).
+   */
+  const chaveFotos = (uid) => `gps_rdo_fotos_nuvem_v1:${uid}`;
   function fotosEnviadas(uid) {
-    try { return JSON.parse(localStorage.getItem(`gps_rdo_fotos_nuvem_v1:${uid}`) || '{}'); } catch { return {}; }
+    try { return JSON.parse(localStorage.getItem(chaveFotos(uid)) || '{}'); } catch { return {}; }
   }
   function marcarFotosEnviadas(uid, docId, ids) {
     const mapa = fotosEnviadas(uid);
-    mapa[docId] = ids;
-    try { localStorage.setItem(`gps_rdo_fotos_nuvem_v1:${uid}`, JSON.stringify(mapa)); } catch { /* sem espaço: sobe de novo */ }
+    if (ids) mapa[docId] = ids;
+    else delete mapa[docId];
+    try { localStorage.setItem(chaveFotos(uid), JSON.stringify(mapa)); } catch { /* sem espaço: sobe de novo */ }
+  }
+  // foto guardada dentro do próprio RDO (aparelho sem IndexedDB) não tem id: vale o tamanho e
+  // a hora dela, para não subir de novo a cada envio
+  const idsDasFotos = (rdo) => (rdo.photos || []).map((p) => p?.foto || p?.id
+    || (p?.data ? `d:${String(p.data).length}:${p.timestamp || ''}` : null));
+
+  /** Fotos recém-baixadas do banco já estão lá: não precisam subir de volta. */
+  function marcarFotosNoBanco(docId, rdo) {
+    const u = atual();
+    if (u) marcarFotosEnviadas(u.uid, docId, idsDasFotos(rdo));
   }
 
-  async function enviarFotos(docId, rdo, uid, { forcar = false } = {}) {
+  /** Faz o aparelho conferir de novo as fotos deste RDO no próximo envio. */
+  function esquecerFotos(docId) {
+    const u = atual();
+    if (u) marcarFotosEnviadas(u.uid, docId, null);
+  }
+
+  // documento do Firestore não passa de 1 MB; a foto vai com folga abaixo disso
+  const LIMITE_FOTO = 900000;
+
+  /**
+   * Sobe as fotos do RDO, uma gravação por foto e só as que mudaram de lugar ou são novas.
+   * Antes iam todas num pacote só: com 20 a 30 fotos o pacote passava do limite do banco
+   * (10 MB por envio) e o RDO nunca subia. Cada foto que sobe já fica anotada, então uma
+   * queda de sinal no meio não faz recomeçar do zero.
+   */
+  async function enviarFotos(docId, rdo, uid) {
     const fotos = rdo.photos || [];
-    const ids = fotos.map((p) => p.foto || p.id || null);
+    const ids = idsDasFotos(rdo);
     const antes = fotosEnviadas(uid)[docId] || [];
     const iguais = ids.length === antes.length && ids.every((id, i) => id && id === antes[i]);
-    if (!forcar && iguais && ids.every(Boolean)) return 0;
-    const lote = db.batch();
+    if (iguais) return 0;
+    const colecao = docRdo(docId).collection('fotos');
+    const feitas = antes.slice(0, ids.length);
     let n = 0;
     for (let i = 0; i < fotos.length; i += 1) {
-      const imagem = await (window.Fotos?.imagem?.(fotos[i]) || Promise.resolve(fotos[i]?.data || null));
-      if (!imagem) continue;
-      lote.set(docRdo(docId).collection('fotos').doc(String(i)), { ordem: i, dados: imagem });
-      n += 1;
+      if (ids[i] && ids[i] === antes[i]) continue;
+      let imagem = await (window.Fotos?.imagem?.(fotos[i]) || Promise.resolve(fotos[i]?.data || null));
+      // imagem que não está neste aparelho: não há o que subir; o que já está no banco fica
+      if (imagem) {
+        if (imagem.length > LIMITE_FOTO && window.Fotos?.encolher) {
+          imagem = await window.Fotos.encolher(imagem, LIMITE_FOTO).catch(() => imagem);
+        }
+        await comPrazo(colecao.doc(String(i)).set({ ordem: i, dados: imagem }), 90000);
+        n += 1;
+      }
+      feitas[i] = ids[i];
+      marcarFotosEnviadas(uid, docId, feitas.slice());
     }
-    // fotos apagadas no aparelho também saem do banco
-    const antigas = await docRdo(docId).collection('fotos').get().catch(() => null);
-    antigas?.docs?.forEach((d) => { if (Number(d.id) >= fotos.length) lote.delete(d.ref); });
-    if (n || antigas?.size) await lote.commit();
+    // fotos apagadas no aparelho também saem do banco. O nome de cada documento é a posição
+    // da foto, então dá para apagar as que sobraram sem baixar nada para conferir.
+    if (antes.length > fotos.length) {
+      const lote = db.batch();
+      for (let i = fotos.length; i < antes.length; i += 1) lote.delete(colecao.doc(String(i)));
+      await comPrazo(lote.commit(), 30000);
+    }
     marcarFotosEnviadas(uid, docId, ids);
     return n;
   }
@@ -248,47 +327,69 @@ window.Nuvem = (() => {
     if (!u) throw new Error('Entre na sua conta.');
     const info = await perfil();
     const docId = idDoc(u.uid, rdo.id);
-    await docRdo(docId).set(registro(rdo, u.uid, info));
-    await enviarFotos(docId, rdo, u.uid);
+    await comPrazo(docRdo(docId).set(registro(rdo, u.uid, info))).catch((e) => { throw falha(e); });
+    await enviarFotos(docId, rdo, u.uid).catch((e) => { throw falha(e); });
     return docId;
   }
 
-  /** O supervisor grava a correção no RDO de outra pessoa; o dono é mantido. */
+  /**
+   * O supervisor grava a correção no RDO de outra pessoa; o dono é mantido. As fotos
+   * acompanham: a que ele tirou do RDO sai do banco, a que ele pôs sobe.
+   */
   async function publicarComo(dono, rdo, infoDoDono) {
     await iniciar();
     const u = atual();
     if (!u) throw new Error('Entre na sua conta.');
     if (!(await mestre())) throw new Error('Só a conta principal corrige RDO dos outros.');
     const docId = idDoc(dono, rdo.id);
-    const info = infoDoDono || (await docRdo(docId).get()).data() || {};
-    await docRdo(docId).set(registro(rdo, dono, { email: info.email, nome: info.nome, assinatura: info.assinatura }));
+    const info = infoDoDono || (await comPrazo(docRdo(docId).get(), 20000).catch((e) => { throw falha(e); })).data() || {};
+    await comPrazo(docRdo(docId).set(registro(rdo, dono, { email: info.email, nome: info.nome })))
+      .catch((e) => { throw falha(e); });
+    await enviarFotos(docId, rdo, u.uid).catch((e) => { throw falha(e); });
     return docId;
   }
 
-  function listaDe(snap) {
-    return snap.docs.map((d) => {
-      const dados = d.data() || {};
-      let json = null;
-      try { json = JSON.parse(dados.json || 'null'); } catch { json = null; }
-      return {
-        docId: d.id,
-        dono: dados.dono,
-        email: dados.email,
-        nome: dados.nome,
-        assinatura: dados.assinatura,
-        atualizado: Number(dados.atualizado) || 0,
-        json,
-      };
-    }).filter((x) => x.json);
+  function registroDe(d) {
+    const dados = d.data() || {};
+    let json = null;
+    try { json = JSON.parse(dados.json || 'null'); } catch { json = null; }
+    return {
+      docId: d.id,
+      dono: dados.dono,
+      email: dados.email,
+      nome: dados.nome,
+      atualizado: Number(dados.atualizado) || 0,
+      json,
+    };
   }
 
-  /** RDOs da própria conta, do banco. */
+  const listaDe = (snap) => snap.docs.map(registroDe).filter((x) => x.json && x.json.id);
+
+  /**
+   * RDOs da própria conta, do banco. `doServidor` diz se a lista veio do banco de verdade
+   * ou da cópia guardada no aparelho (sem sinal): só a lista de verdade serve para concluir
+   * que um RDO foi apagado em outro lugar.
+   */
   async function meusRdos() {
     await iniciar();
-    const u = atual();
-    if (!u) return [];
-    const snap = await db.collection('rdos').where('dono', '==', u.uid).get();
-    return listaDe(snap);
+    // numa aba recém-aberta a sessão guardada ainda está voltando: esperar por ela
+    const u = atual() || (await sessaoPronta());
+    if (!u) throw Object.assign(new Error('Entre na sua conta.'), { codigo: 'sem-sessao' });
+    const snap = await comPrazo(db.collection('rdos').where('dono', '==', u.uid).get(), 30000)
+      .catch((e) => { throw falha(e); });
+    const lista = listaDe(snap);
+    lista.doServidor = snap.metadata?.fromCache !== true;
+    lista.uid = u.uid;
+    return lista;
+  }
+
+  /** Um RDO do banco pelo documento (a conta principal lê o de qualquer pessoa). null se não existe. */
+  async function umRdo(docId) {
+    await iniciar();
+    const d = await comPrazo(docRdo(docId).get({ source: 'server' }), 20000).catch((e) => { throw falha(e); });
+    if (!d.exists) return null;
+    const r = registroDe(d);
+    return r.json ? r : null;
   }
 
   /** Todos os RDOs (conta principal), opcionalmente por data de/até (AAAA-MM-DD). */
@@ -298,8 +399,11 @@ window.Nuvem = (() => {
     // duas comparações no mesmo campo não pedem índice composto
     if (de) consulta = consulta.where('date', '>=', de);
     if (ate) consulta = consulta.where('date', '<=', ate);
-    const snap = await consulta.get();
-    return listaDe(snap).sort((a, b) => String(a.json.number).localeCompare(String(b.json.number)));
+    const snap = await comPrazo(consulta.get(), 45000).catch((e) => { throw falha(e); });
+    const lista = listaDe(snap).sort((a, b) => String(a.json.number).localeCompare(String(b.json.number)));
+    // sem sinal a lista vem da cópia guardada no aparelho: a tela avisa que pode estar velha
+    lista.doServidor = snap.metadata?.fromCache !== true;
+    return lista;
   }
 
   /** Espera o banco devolver a sessão guardada: numa aba nova a consulta sairia sem login. */
@@ -318,7 +422,11 @@ window.Nuvem = (() => {
    */
   async function usuarios() {
     await iniciar();
-    const snap = await db.collection('usuarios').get().catch((e) => { throw falha(e); });
+    const snap = await comPrazo(db.collection('usuarios').get(), 30000).catch((e) => { throw falha(e); });
+    // quem lista é a conta principal (a regra do banco só deixa ela listar): é ela mesma que
+    // fica de fora do controle. O e-mail escrito no perfil não serve para isso: cada um
+    // edita o próprio perfil, e quem pusesse lá o e-mail do supervisor sumia do Controle.
+    const eu = atual()?.uid;
     return snap.docs.map((d) => {
       const x = d.data() || {};
       const email = String(x.email || '').toLowerCase();
@@ -327,37 +435,57 @@ window.Nuvem = (() => {
         nome: String(x.nome || '').trim() || email || 'sem nome',
         email,
         funcao: String(x.funcao || '').trim(),
-        // o documento do supervisor pode ter nascido com mestre=false (e-mail ainda não confirmado)
-        mestre: x.mestre === true || email === MESTRE,
+        // (o campo `mestre` do perfil só a própria conta principal consegue gravar como true)
+        mestre: d.id === eu || x.mestre === true,
         criado: Number(x.criado) || 0,
       };
     });
   }
 
-  /** Imagens de um RDO do banco, na ordem original. */
+  /**
+   * Imagens de um RDO do banco, cada uma na posição da foto dela (posição sem imagem fica
+   * vazia). Antes a lista vinha "apertada": faltando uma no meio, as seguintes iam parar na
+   * foto errada, com a legenda de outra.
+   */
   async function fotosDe(docId) {
     await iniciar();
-    const snap = await docRdo(docId).collection('fotos').get();
-    return snap.docs
-      .map((d) => ({ ordem: Number(d.data().ordem) || 0, dados: d.data().dados }))
-      .filter((f) => f.dados)
-      .sort((a, b) => a.ordem - b.ordem)
-      .map((f) => f.dados);
+    const snap = await comPrazo(docRdo(docId).collection('fotos').get(), 120000).catch((e) => { throw falha(e); });
+    const lista = [];
+    snap.docs.forEach((d) => {
+      const x = d.data() || {};
+      const ordem = Number.isInteger(Number(x.ordem)) ? Number(x.ordem) : Number(d.id);
+      if (x.dados && ordem >= 0) lista[ordem] = x.dados;
+    });
+    return lista;
   }
 
-  async function apagar(docId) {
+  /**
+   * Apaga o RDO e as fotos dele do banco. Sabendo quantas fotos eram (`nFotos`), apaga pela
+   * posição, sem baixar nada; sem saber, lista as fotos primeiro (e aí baixa todas só para
+   * descobrir quais existem, por isso quem chama deve informar a quantidade).
+   */
+  async function apagar(docId, nFotos) {
     await iniciar();
-    const fotos = await docRdo(docId).collection('fotos').get().catch(() => null);
+    const colecao = docRdo(docId).collection('fotos');
     const lote = db.batch();
-    fotos?.docs?.forEach((d) => lote.delete(d.ref));
+    if (Number.isInteger(nFotos) && nFotos >= 0) {
+      const u = atual();
+      const anotadas = u ? (fotosEnviadas(u.uid)[docId] || []).length : 0;
+      for (let i = 0; i < Math.max(nFotos, anotadas); i += 1) lote.delete(colecao.doc(String(i)));
+    } else {
+      const fotos = await comPrazo(colecao.get(), 120000).catch((e) => { throw falha(e); });
+      fotos.docs.forEach((d) => lote.delete(d.ref));
+    }
     lote.delete(docRdo(docId));
-    await lote.commit();
+    await comPrazo(lote.commit(), 30000).catch((e) => { throw falha(e); });
+    esquecerFotos(docId);
   }
 
   return {
     configurado, emulador: EMULADOR, iniciar, aoMudar, atual,
     perfil, cadastrar, entrar, sair, esqueci, trocarSenha, salvarPerfil, mestre,
-    publicar, publicarComo, meusRdos, todos, usuarios, sessaoPronta, fotosDe, apagar, idDoc,
+    publicar, publicarComo, meusRdos, umRdo, todos, usuarios, sessaoPronta, fotosDe, apagar, idDoc,
+    marcarFotosNoBanco, esquecerFotos,
     MESTRE,
   };
 })();

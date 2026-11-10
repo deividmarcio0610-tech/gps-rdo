@@ -54,9 +54,11 @@ window.Fotos = (() => {
 
   /** Primeira vez desta conta no aparelho: as fotos que já estavam aqui passam a ser dela. */
   async function adotarAntigas() {
-    if (!conta || (await contar(nomeBanco())) > 0 || (await contar(BANCO)) === 0) return 0;
+    // o nome fica guardado aqui: se a conta trocar no meio da cópia, o destino não muda
+    const alvo = nomeBanco();
+    if (!conta || (await contar(alvo)) > 0 || (await contar(BANCO)) === 0) return 0;
     const origem = await abrirBruto(BANCO);
-    const destino = await abrirBruto(nomeBanco());
+    const destino = await abrirBruto(alvo);
     try {
       const todas = await new Promise((ok, falha) => {
         const pedido = origem.transaction(LOJA).objectStore(LOJA).getAll();
@@ -79,18 +81,28 @@ window.Fotos = (() => {
     }
   }
 
-  /** Troca o banco de fotos ao entrar/sair de conta. `adotar` copia as fotos antigas na 1ª vez. */
-  async function usarConta(id, { adotar = false } = {}) {
+  // cópia das fotos antigas em andamento: quem for ler ou gravar espera ela terminar
+  let adocao = Promise.resolve();
+
+  /**
+   * Troca o banco de fotos ao entrar/sair de conta. `adotar` copia as fotos antigas na 1ª vez.
+   * A troca vale na hora (sem esperar nada): antes ela só valia um instante depois, e uma
+   * foto lida ou tirada nesse meio-tempo (app aberto pelo atalho "Fotos") ia parar no banco
+   * de fotos errado e sumia na abertura seguinte.
+   */
+  function usarConta(id, { adotar = false } = {}) {
     const novo = id ? String(id) : '';
-    if (novo === conta && conexao) return;
-    await fecharConexao();
+    if (novo === conta) return adocao;
+    fecharConexao();
     conta = novo;
-    if (novo && adotar) {
-      try { await adotarAntigas(); } catch { /* sem IndexedDB: segue sem copiar */ }
-    }
+    adocao = novo && adotar
+      ? adotarAntigas().then(() => {}, () => { /* sem IndexedDB: segue sem copiar */ })
+      : Promise.resolve();
+    return adocao;
   }
 
   async function operar(modo, fazer) {
+    await adocao;
     const db = await abrir();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(LOJA, modo);
@@ -152,6 +164,32 @@ window.Fotos = (() => {
     }
   }
 
+  /**
+   * Devolve a imagem (data URL) com no máximo `limite` caracteres, baixando a qualidade e o
+   * tamanho aos poucos. O banco na nuvem recusa documento acima de 1 MB: uma foto cheia de
+   * detalhe (brita, mato) passava disso e o RDO inteiro ficava sem subir.
+   */
+  async function encolher(dataUrl, limite = 900000) {
+    if (!dataUrl || dataUrl.length <= limite || typeof Image === 'undefined') return dataUrl;
+    const img = await new Promise((resolve, reject) => {
+      const i = new Image();
+      i.onload = () => resolve(i);
+      i.onerror = () => reject(new Error('imagem inválida'));
+      i.src = dataUrl;
+    });
+    let menor = dataUrl;
+    for (const [lado, qualidade] of [[1600, 0.7], [1600, 0.6], [1280, 0.6], [1024, 0.6], [800, 0.5]]) {
+      const escala = Math.min(1, lado / Math.max(img.naturalWidth, img.naturalHeight));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(img.naturalWidth * escala));
+      canvas.height = Math.max(1, Math.round(img.naturalHeight * escala));
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      menor = canvas.toDataURL('image/jpeg', qualidade);
+      if (menor.length <= limite) break;
+    }
+    return menor;
+  }
+
   /** Guarda a imagem e devolve o que vai no RDO: { foto: id } ou, sem IndexedDB, { data }. */
   async function salvar(dataUrl) {
     const id = `f_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -201,5 +239,5 @@ window.Fotos = (() => {
     return mudou;
   }
 
-  return { reduzir, salvar, imagem, remover, migrar, usarConta };
+  return { reduzir, encolher, salvar, imagem, remover, migrar, usarConta };
 })();

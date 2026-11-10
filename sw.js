@@ -3,7 +3,7 @@
  * Estratégia — rede primeiro para o HTML (pega versão nova quando há internet),
  * cache primeiro para os demais arquivos, que só mudam junto com uma versão.
  */
-const VERSAO = 'gps-rdo-v28';
+const VERSAO = 'gps-rdo-v31';
 const ESSENCIAIS = [
   './',
   'index.html',
@@ -37,8 +37,11 @@ const ESSENCIAIS = [
 self.addEventListener('install', (evento) => {
   evento.waitUntil(
     caches.open(VERSAO)
-      // addAll falha inteiro se um arquivo faltar; melhor falhar cedo e claro
-      .then((cache) => cache.addAll(ESSENCIAIS))
+      // addAll falha inteiro se um arquivo faltar; melhor falhar cedo e claro.
+      // 'reload' busca cada arquivo na rede, sem passar pela memória do navegador: com duas
+      // publicações no mesmo dia, a versão nova podia guardar arquivo da anterior e ficar
+      // misturada (tela nova com código velho) até a próxima publicação.
+      .then((cache) => cache.addAll(ESSENCIAIS.map((arquivo) => new Request(arquivo, { cache: 'reload' }))))
       .then(() => self.skipWaiting()),
   );
 });
@@ -46,10 +49,15 @@ self.addEventListener('install', (evento) => {
 self.addEventListener('activate', (evento) => {
   evento.waitUntil(
     caches.keys()
-      .then((chaves) => Promise.all(chaves.filter((k) => k !== VERSAO).map((k) => caches.delete(k))))
+      // só as versões antigas DESTE app: o endereço do site pode abrigar outros apps, com os caches deles
+      .then((chaves) => Promise.all(chaves.filter((k) => k.startsWith('gps-rdo-') && k !== VERSAO).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()),
   );
 });
+
+// Com sinal fraco a rede não responde nem falha: fica pendurada. Depois deste tempo o app
+// abre com a cópia guardada, em vez de deixar a tela em branco até a rede desistir.
+const PRAZO_DA_REDE = 3000;
 
 self.addEventListener('fetch', (evento) => {
   const { request } = evento;
@@ -59,20 +67,29 @@ self.addEventListener('fetch', (evento) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
-  // navegação: rede primeiro, cache quando offline
+  // navegação: rede primeiro (pega a versão nova quando há internet), cache quando offline,
+  // quando a rede demora demais ou quando o servidor responde com erro
   if (request.mode === 'navigate') {
-    evento.respondWith(
-      fetch(request)
-        .then((resposta) => {
-          // só guarda como index.html o que for a página do app (um download, por exemplo, não)
-          if (resposta.ok && (resposta.headers.get('content-type') || '').includes('text/html')) {
-            const copia = resposta.clone();
-            caches.open(VERSAO).then((cache) => cache.put('index.html', copia));
-          }
-          return resposta;
-        })
-        .catch(() => caches.match('index.html').then((r) => r || caches.match('./'))),
-    );
+    const daRede = fetch(request).then((resposta) => {
+      // só guarda como index.html o que for a página do app (um download, por exemplo, não)
+      if (resposta.ok && (resposta.headers.get('content-type') || '').includes('text/html')) {
+        const copia = resposta.clone();
+        caches.open(VERSAO).then((cache) => cache.put('index.html', copia));
+      }
+      return resposta;
+    });
+    // a busca continua mesmo depois de o app abrir pelo cache: a página guardada fica em dia
+    evento.waitUntil(daRede.catch(() => {}));
+    evento.respondWith((async () => {
+      const guardada = (await caches.match('index.html')) || (await caches.match('./'));
+      // primeira abertura, ainda sem nada guardado: só a rede resolve
+      if (!guardada) return daRede;
+      let relogio = null;
+      const prazo = new Promise((resolver) => { relogio = setTimeout(() => resolver(null), PRAZO_DA_REDE); });
+      const resposta = await Promise.race([daRede.catch(() => null), prazo]);
+      clearTimeout(relogio);
+      return resposta && resposta.ok ? resposta : guardada;
+    })());
     return;
   }
 

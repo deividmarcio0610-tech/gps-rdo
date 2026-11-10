@@ -6,6 +6,18 @@ window.Screens = (() => {
 
   let app = null; // preenchido em boot()
 
+  const SEM_ESPACO = 'Não foi possível salvar: o aparelho está sem espaço. Apague relatórios antigos.';
+
+  /**
+   * Grava uma alteração no RDO e avisa: `certo` quando gravou, o aviso de falta de espaço
+   * quando não. Antes várias telas diziam "adicionado" mesmo sem ter gravado nada.
+   */
+  function gravar(rdo, alterar, certo = '') {
+    if (!Store.update(rdo.id, alterar)) { toast(SEM_ESPACO); return false; }
+    if (certo) toast(certo);
+    return true;
+  }
+
   const TITULOS = {
     home: 'Selecione a Ação',
     header: 'Cabeçalho do RDO',
@@ -24,6 +36,7 @@ window.Screens = (() => {
     conta: 'Minha Conta',
     equipe: 'RDOs da Equipe',
     controle: 'Controle de RDO',
+    sair: 'Sair da conta',
   };
 
   // -------------------------------------------------------------- filtro dos RDOs
@@ -102,18 +115,24 @@ window.Screens = (() => {
     if (!achados.length) {
       return `<div class="empty">${filtrando ? 'Nenhum RDO nesta data/tipo.' : 'Nenhum RDO registrado ainda.'}</div>`;
     }
-    // quem ainda não subiu para o banco ganha um selo na lista
+    // quem ainda não subiu para o banco ganha um selo na lista; quem o banco recusou, outro
     const naFila = new Set((window.Conta?.pendentes?.() || []).map((x) => x.id));
+    const recusados = new Set((window.Conta?.comErro?.() || []).map((x) => x.id));
+    // na conta principal ficam aqui também os RDOs de outras pessoas que ela abriu: a lista diz de quem é
+    const meu = window.Conta?.usuario?.()?.id;
+    const deQuem = (r) => (r.dono && meu && r.dono !== meu ? ` · de ${esc(r.donoNome || 'outra pessoa')}` : '');
     return `
       <div class="contagem">${resumoFiltro(achados.length)}${!filtrando && achados.length > LIMITE_LISTA ? ` · mostrando os ${LIMITE_LISTA} mais recentes` : ''}</div>
       ${mostrados.map((r) => `
         <button class="row${r.id === atualId ? ' row-atual' : ''}" data-open="${esc(r.id)}">
           <div class="grow">
             <div class="num">RDO ${esc(r.number)}</div>
-            <div class="meta">${fmtDate(r.date)} · ${esc(r.location || 'Sem local')}</div>
+            <div class="meta">${fmtDate(r.date)} · ${esc(r.location || 'Sem local')}${deQuem(r)}</div>
           </div>
           ${r.id === atualId ? '<span class="badge green">aberto</span>' : ''}
           ${naFila.has(r.id) ? '<span class="badge amber">aguardando envio</span>' : ''}
+          ${recusados.has(r.id) ? '<span class="badge red">banco recusou</span>' : ''}
+          ${r._fora ? '<span class="badge gray">só neste aparelho</span>' : ''}
           ${seloTipo(r)}
           <span class="arrow">${icon('chevron', 16)}</span>
         </button>`).join('')}`;
@@ -157,13 +176,16 @@ window.Screens = (() => {
           <button class="action-card" data-go="tasks">${icon('clipboard')}Tarefas Realizadas${contagem('tasks')}</button>
           <button class="action-card" data-go="occurrences">${icon('alert')}Ocorrências${contagem('occurrences')}</button>
           <button class="action-card" data-go="photos">${icon('camera')}Fotos do RDO${contagem('photos')}</button>
-          ${window.Conta?.ehMestre?.() ? `<button class="action-card" data-act="relatorio-aba">${icon('output')}Gerar Relatório</button>` : ''}
+          ${window.Conta?.ehMestre?.()
+            ? `<button class="action-card" data-act="relatorio-aba">${icon('output')}Gerar Relatório</button>`
+            : `<button class="action-card wide" data-act="relatorio-campo">${icon('output', 20)}Gerar Relatório de Campo e Enviar</button>`}
           ${window.Conta?.ehMestre?.() ? `<button class="action-card" data-go="month">${icon('chart')}Resumo do Mês</button>` : ''}
           ${window.Conta?.ehMestre?.() ? `<button class="action-card" data-act="controle-aba">${icon('clipboard')}Controle de RDO</button>` : ''}
           ${window.Conta?.ehMestre?.() ? `<button class="action-card wide" data-go="equipe">${icon('users', 20)}RDOs da Equipe</button>` : ''}
           <button class="action-card wide neutro-card" data-go="backup">${icon('shield', 20)}Cópia de Segurança</button>
           <button class="action-card wide neutro-card" data-go="conta">${icon('lock', 20)}Minha Conta</button>
           <button class="action-card wide danger-card" data-go="reports">${icon('trash', 20)}Apagar Relatórios</button>
+          <button class="action-card wide neutro-card sair-card" data-go="sair">${icon('sair', 20)}Sair da conta</button>
         </div>
 
         <div class="history">
@@ -191,6 +213,13 @@ window.Screens = (() => {
           if (!aba) { app.go('report'); return; }
           try { aba.opener = null; } catch { /* nada a fazer */ }
         });
+        // pedido de 10/11/2026: o funcionário, depois de preencher, gera e envia o Relatório de
+        // Campo por aqui (antes o cartão de relatório só existia na conta principal)
+        root.querySelector('[data-act="relatorio-campo"]')?.addEventListener('click', () => {
+          abaRelatorio = 'campo';
+          if (rdo) app.abrir(rdo.id);
+          else app.go('report');
+        });
         // pedido de 09/11/2026: Controle de RDO (quem fez e quem não fez) também abre em aba nova
         root.querySelector('[data-act="controle-aba"]')?.addEventListener('click', () => {
           if (window.Capacitor?.isNativePlatform?.()) { app.go('controle'); return; }
@@ -202,6 +231,7 @@ window.Screens = (() => {
         });
         root.querySelector('[data-act="novo"]')?.addEventListener('click', () => {
           const novo = Store.createRdo();
+          if (!novo) { toast(SEM_ESPACO); return; }
           app.abrir(novo.id);
           toast(`Novo RDO ${novo.number} criado.`);
         });
@@ -281,10 +311,6 @@ window.Screens = (() => {
             <input id="h-sup" type="text" value="${esc(rdo.supervisor)}" data-key="supervisor" placeholder="Nome do supervisor">
           </div>
           <div class="field full">
-            <label for="h-tst">Técnico de Segurança</label>
-            <input id="h-tst" type="text" value="${esc(rdo.tst)}" data-key="tst" placeholder="Nome do técnico de segurança (vai na equipe do PDF)">
-          </div>
-          <div class="field full">
             <label for="h-notes">Observações Gerais</label>
             <textarea id="h-notes" data-key="notes" data-ditado placeholder="Condições, liberações, observações do dia">${esc(rdo.notes)}</textarea>
           </div>
@@ -317,7 +343,8 @@ window.Screens = (() => {
             d.startTime = ler('startTime').value;
             d.endTime = ler('endTime').value;
             d.supervisor = ler('supervisor').value;
-            d.tst = ler('tst').value;
+            // Técnico de Segurança saiu do cabeçalho (pedido de 10/11/2026): entra em Mão de Obra,
+            // como funcionário com a função. RDO antigo que já tem o nome (`tst`) continua com ele.
             d.notes = ler('notes').value;
           });
           if (!salvo) { toast('Não foi possível salvar: o aparelho está sem espaço.'); return; }
@@ -330,16 +357,21 @@ window.Screens = (() => {
 
   // -------------------------------------------------------------- etapas do dia
 
-  // registro de execução de atividades do formulário "RDO ADM": os nomes são fixos,
-  // quem preenche digita só a hora de início e a de fim de cada etapa.
+  // Registro de execução de atividades do formulário "RDO ADM": os nomes são fixos e as horas
+  // já vêm com o horário fixo do modelo; quem preenche muda só o que foi diferente. O bloqueio
+  // do dia é lançado aqui (linha 9): o tempo parado sai sozinho do fim da execução.
   function etapas(rdo) {
     const trava = travado(rdo);
-    const horas = Store.completo(rdo).etapas;
+    const EXEC = Store.ETAPA_EXECUCAO;
+    // pedido de 10/11/2026: as horas já vêm com o horário fixo do modelo do cliente
+    const horas = Store.etapasDoRdo(rdo);
+    const bloqueio = rdo.bloqueio || { inicio: '', fim: '', motivo: '' };
     return {
       titulo: TITULOS.etapas,
       html: `
         ${trava ? avisoTravado(rdo) : ''}
-        <p class="dica">Horas de cada etapa do dia, como no formulário do cliente. O que ficar em branco sai em branco no PDF.</p>
+        <p class="dica">As horas já vêm com o horário fixo do modelo do cliente: mude só o que foi diferente no dia.
+          Teve bloqueio? Lance no fim da lista e o tempo parado sai sozinho do fim da execução (etapa ${EXEC + 1}).</p>
         <fieldset class="campos"${trava ? ' disabled' : ''}>
           ${Store.ETAPAS.map((nome, i) => `
             <div class="etapa">
@@ -354,20 +386,96 @@ window.Screens = (() => {
                   <input id="etapa-${i}-fim" type="time" data-etapa="${i}" data-campo="fim" value="${esc(horas[i].fim)}">
                 </div>
               </div>
+              ${i === EXEC ? '<p class="dica desconto" data-desconto hidden></p>' : ''}
             </div>`).join('')}
+          <div class="etapa etapa-bloqueio">
+            <div class="etapa-nome">${Store.ETAPAS.length + 1}. ESPERA POR BLOQUEIO (só se houve)</div>
+            <div class="form-grid">
+              <div class="field">
+                <label for="bloqueio-ini">Início</label>
+                <input id="bloqueio-ini" type="time" data-bloqueio="inicio" value="${esc(bloqueio.inicio)}">
+              </div>
+              <div class="field">
+                <label for="bloqueio-fim">Fim</label>
+                <input id="bloqueio-fim" type="time" data-bloqueio="fim" value="${esc(bloqueio.fim)}">
+              </div>
+              <div class="field full">
+                <label for="bloqueio-motivo">Justificativa do bloqueio</label>
+                <input id="bloqueio-motivo" type="text" data-bloqueio="motivo" value="${esc(bloqueio.motivo)}" maxlength="160" autocomplete="off" placeholder="Ex.: aguardando liberação da área">
+              </div>
+            </div>
+            <p class="dica">Com as duas horas do bloqueio, o fim da execução já aparece descontado acima. No RDO Final o bloqueio sai na linha 9 e a frase entra na observação.</p>
+          </div>
         </fieldset>
         ${trava ? '' : '<button class="btn primary block" data-act="salvar-etapas">Salvar Etapas</button>'}`,
       bind(root) {
+        const campo = (i, qual) => root.querySelector(`[data-etapa="${i}"][data-campo="${qual}"]`);
+        const doBloqueio = (qual) => root.querySelector(`[data-bloqueio="${qual}"]`);
+        const inicioExecucao = campo(EXEC, 'inicio');
+        const fimExecucao = campo(EXEC, 'fim');
+        const aviso = root.querySelector('[data-desconto]');
+        const digitado = () => ({
+          inicio: doBloqueio('inicio').value,
+          fim: doBloqueio('fim').value,
+          motivo: doBloqueio('motivo').value.trim(),
+        });
+
+        // Fim da execução SEM o bloqueio: é este que fica guardado no RDO. Com bloqueio, o campo
+        // mostra a hora já descontada e trava, para ninguém descontar de novo à mão.
+        let fimSemBloqueio = horas[EXEC].fim;
+
+        /** Refaz a conta e mostra o fim da execução com o desconto (ou devolve o campo ao normal). */
+        function recalcular() {
+          const conta = Store.contaDoBloqueio(inicioExecucao.value, fimSemBloqueio, digitado());
+          const descontando = Boolean(conta && conta.execucao != null);
+          fimExecucao.readOnly = descontando;
+          fimExecucao.value = descontando ? conta.fimAjustado : fimSemBloqueio;
+          aviso.hidden = !conta;
+          aviso.classList.toggle('erro', Boolean(conta) && (!descontando || !conta.cabe));
+          if (!conta) aviso.textContent = '';
+          else if (!descontando) aviso.textContent = `Preencha o início e o fim da execução: é dela que sai o tempo do bloqueio (${Store.fmtHoras(conta.minutos)}).`;
+          else if (!conta.cabe) aviso.textContent = `O bloqueio (${Store.fmtHoras(conta.minutos)}) é maior que a execução (${Store.fmtHoras(conta.execucao)}). Confira as horas.`;
+          else aviso.textContent = `Fim sem o bloqueio: ${fimSemBloqueio}. Menos ${Store.fmtHoras(conta.minutos)} de bloqueio, a execução vai até ${conta.fimAjustado}. Para mudar o fim, apague as horas do bloqueio.`;
+          return conta;
+        }
+
+        // sem bloqueio, o que se digita no fim da execução é o fim de verdade
+        const guardarFim = () => { if (!fimExecucao.readOnly) fimSemBloqueio = fimExecucao.value; };
+        fimExecucao.addEventListener('input', guardarFim);
+        // ao terminar de digitar o fim, a conta é refeita (no 'change', não a cada tecla, para o
+        // campo não travar no meio da digitação): com o bloqueio já lançado, o desconto aparece na hora
+        fimExecucao.addEventListener('change', () => { guardarFim(); recalcular(); });
+        [inicioExecucao, doBloqueio('inicio'), doBloqueio('fim')].forEach((entrada) => {
+          entrada.addEventListener('input', recalcular);
+          entrada.addEventListener('change', recalcular);
+        });
+        recalcular();
+
         root.querySelector('[data-act="salvar-etapas"]')?.addEventListener('click', () => {
+          guardarFim();
+          const bq = digitado();
+          if (Boolean(bq.inicio) !== Boolean(bq.fim)) { toast('Informe o início e o fim do bloqueio.'); return; }
+          if (bq.inicio && bq.inicio === bq.fim) { toast('O fim do bloqueio é igual ao início.'); return; }
+          if (!bq.inicio && bq.motivo) { toast('Informe as horas do bloqueio, ou apague a justificativa.'); return; }
+          // a execução guarda o fim SEM o desconto; o desconto é sempre calculado na hora
           const novas = Store.ETAPAS.map((_, i) => ({
-            inicio: root.querySelector(`[data-etapa="${i}"][data-campo="inicio"]`).value,
-            fim: root.querySelector(`[data-etapa="${i}"][data-campo="fim"]`).value,
+            inicio: campo(i, 'inicio').value,
+            fim: i === EXEC ? fimSemBloqueio : campo(i, 'fim').value,
           }));
-          if (!Store.update(rdo.id, (d) => { d.etapas = novas; })) {
-            toast('Não foi possível salvar: o aparelho está sem espaço.');
+          const conta = Store.contaDoBloqueio(novas[EXEC].inicio, novas[EXEC].fim, bq);
+          if (conta && conta.execucao == null) {
+            toast(`Preencha o início e o fim da execução (etapa ${EXEC + 1}) para descontar o bloqueio.`);
             return;
           }
-          toast('Etapas salvas.');
+          if (conta && !conta.cabe) {
+            toast(`O bloqueio (${Store.fmtHoras(conta.minutos)}) é maior que a execução (${Store.fmtHoras(conta.execucao)}). Confira as horas.`);
+            return;
+          }
+          if (!Store.update(rdo.id, (d) => { d.etapas = novas; d.bloqueio = bq.inicio ? bq : null; })) {
+            toast(SEM_ESPACO);
+            return;
+          }
+          toast(conta ? `Etapas salvas. Com o bloqueio, a execução vai até ${conta.fimAjustado}.` : 'Etapas salvas.');
           app.voltar();
         });
       },
@@ -394,7 +502,7 @@ window.Screens = (() => {
       { key: 'role', label: 'Função', placeholder: 'Função', value: w.role },
       { key: 'team', label: 'Equipe', placeholder: 'Equipe', value: w.team },
       { key: 'status', label: 'Presença', type: 'select', options: [{ value: '', label: 'Selecione' }, 'Presente', 'Falta'], value: w.status },
-      { key: 'hours', label: 'Horas', type: 'number', placeholder: 'Horas trabalhadas', value: w.hours ?? '' },
+      { key: 'hours', label: 'Horas', type: 'number', max: 24, placeholder: 'Horas trabalhadas', value: w.hours ?? '' },
     ];
     const ler = (valores) => {
       if (!valores.name) { toast('Informe o nome.'); return null; }
@@ -404,7 +512,8 @@ window.Screens = (() => {
         role: valores.role || '',
         team: valores.team || '',
         status: valores.status,
-        hours: valores.status === 'Falta' ? 0 : (valores.hours === '' ? null : Number(valores.hours) || 0),
+        // horas de um dia: nem negativa nem acima de 24 (erro de digitação não vai para o resumo do mês)
+        hours: valores.status === 'Falta' ? 0 : (valores.hours === '' ? null : Math.max(0, Math.min(24, Number(valores.hours) || 0))),
       };
     };
     return {
@@ -455,12 +564,12 @@ window.Screens = (() => {
           });
           if (!valores || !valores.pessoas?.length) return;
           const todos = Store.equipe.flatMap((g) => g.pessoas);
-          Store.update(rdo.id, (d) => {
+          if (!gravar(rdo, (d) => {
             valores.pessoas.forEach((chave) => {
               const p = todos.find((x) => `${x.team}|${x.name}` === chave);
               if (p) d.workforce.push({ id: Store.uid(), name: p.name, role: p.role || '', team: p.team, status: 'Presente', hours: null });
             });
-          });
+          })) return;
           toast(`${valores.pessoas.length} pessoa(s) adicionada(s).`);
           app.render();
         });
@@ -470,7 +579,7 @@ window.Screens = (() => {
           const valores = await sheet({ title: 'Adicionar pessoa', fields: campos(), submit: 'Adicionar' });
           const pessoa = valores && ler(valores);
           if (!pessoa) return;
-          Store.update(rdo.id, (d) => { d.workforce.push({ id: Store.uid(), ...pessoa }); });
+          if (!gravar(rdo, (d) => { d.workforce.push({ id: Store.uid(), ...pessoa }); })) return;
           toast('Mão de obra atualizada.');
           app.render();
         });
@@ -482,17 +591,17 @@ window.Screens = (() => {
             const valores = await sheet({ title: 'Corrigir pessoa', fields: campos(atual), submit: 'Salvar' });
             const pessoa = valores && ler(valores);
             if (!pessoa) return;
-            Store.update(rdo.id, (d) => { Object.assign(d.workforce.find((w) => w.id === atual.id), pessoa); });
+            if (!gravar(rdo, (d) => { Object.assign(d.workforce.find((w) => w.id === atual.id), pessoa); })) return;
             app.render();
           });
         });
 
         root.querySelectorAll('[data-presenca]').forEach((b) => {
           b.addEventListener('click', () => {
-            Store.update(rdo.id, (d) => {
+            if (!gravar(rdo, (d) => {
               const w = d.workforce.find((x) => x.id === b.dataset.presenca);
               if (w) w.status = w.status === 'Presente' ? 'Falta' : 'Presente';
-            });
+            })) return;
             app.render();
           });
         });
@@ -506,9 +615,9 @@ window.Screens = (() => {
           const ok = await confirmar('Copiar equipe',
             `Copiar ${novas.length} pessoa(s) do RDO ${origem.number} (${fmtDate(origem.date)})? Confira a presença de cada um depois.`, 'Copiar');
           if (!ok) return;
-          Store.update(rdo.id, (d) => {
+          if (!gravar(rdo, (d) => {
             novas.forEach((w) => d.workforce.push({ id: Store.uid(), name: w.name, role: w.role || '', team: w.team || '', status: w.status, hours: w.hours ?? null }));
-          });
+          })) return;
           toast(`${novas.length} pessoa(s) copiada(s).`);
           app.render();
         });
@@ -517,7 +626,7 @@ window.Screens = (() => {
           b.addEventListener('click', async () => {
             const ok = await confirmar('Remover pessoa', 'Remover este registro de mão de obra?');
             if (!ok) return;
-            Store.update(rdo.id, (d) => { d.workforce = d.workforce.filter((w) => w.id !== b.dataset.del); });
+            if (!gravar(rdo, (d) => { d.workforce = d.workforce.filter((w) => w.id !== b.dataset.del); })) return;
             app.render();
           });
         });
@@ -529,7 +638,8 @@ window.Screens = (() => {
 
   function equipment(rdo) {
     const badge = (s) => (s === 'Operando' ? 'green' : s === 'Manutenção' ? 'amber' : 'red');
-    const horas = (v) => (v == null || v === '' ? '—' : `${v}h`);
+    // o valor vai para o HTML da tela: passa pelo esc() como todo dado do RDO
+    const horas = (v) => (v == null || v === '' ? '—' : `${esc(String(v).replace('.', ','))}h`);
     const trava = travado(rdo);
     // mesma folha para adicionar e para corrigir (toque no nome); horímetro em branco
     const campos = (e = {}) => [
@@ -538,7 +648,7 @@ window.Screens = (() => {
       { key: 'hoursStart', label: 'Horímetro inicial', type: 'number', placeholder: 'Horímetro inicial', value: e.hoursStart ?? '' },
       { key: 'hoursEnd', label: 'Horímetro final', type: 'number', placeholder: 'Horímetro final', value: e.hoursEnd ?? '' },
     ];
-    const horimetro = (v) => (v === '' ? null : Number(v) || 0);
+    const horimetro = (v) => (v === '' ? null : Math.max(0, Number(v) || 0));
     const ler = (valores) => {
       if (!valores.name) { toast('Informe o equipamento.'); return null; }
       if (!valores.status) { toast('Informe o status do equipamento.'); return null; }
@@ -573,7 +683,7 @@ window.Screens = (() => {
           const valores = await sheet({ title: 'Equipamento', fields: campos(), submit: 'Adicionar' });
           const item = valores && ler(valores);
           if (!item) return;
-          Store.update(rdo.id, (d) => { d.equipmentList.push(item); });
+          if (!gravar(rdo, (d) => { d.equipmentList.push(item); })) return;
           toast('Equipamento adicionado.');
           app.render();
         });
@@ -584,7 +694,7 @@ window.Screens = (() => {
             const valores = await sheet({ title: 'Corrigir equipamento', fields: campos(rdo.equipmentList[i]), submit: 'Salvar' });
             const item = valores && ler(valores);
             if (!item) return;
-            Store.update(rdo.id, (d) => { d.equipmentList[i] = item; });
+            if (!gravar(rdo, (d) => { d.equipmentList[i] = item; })) return;
             app.render();
           });
         });
@@ -598,9 +708,9 @@ window.Screens = (() => {
           const ok = await confirmar('Copiar equipamentos',
             `Copiar ${novos.length} equipamento(s) do RDO ${origem.number} (${fmtDate(origem.date)})? O horímetro fica em branco para você digitar.`, 'Copiar');
           if (!ok) return;
-          Store.update(rdo.id, (d) => {
+          if (!gravar(rdo, (d) => {
             novos.forEach((x) => d.equipmentList.push({ name: x.name, status: x.status, hoursStart: null, hoursEnd: null }));
-          });
+          })) return;
           toast(`${novos.length} equipamento(s) copiado(s).`);
           app.render();
         });
@@ -609,7 +719,7 @@ window.Screens = (() => {
           b.addEventListener('click', async () => {
             const ok = await confirmar('Remover equipamento', 'Remover este equipamento do relatório?');
             if (!ok) return;
-            Store.update(rdo.id, (d) => { d.equipmentList.splice(Number(b.dataset.del), 1); });
+            if (!gravar(rdo, (d) => { d.equipmentList.splice(Number(b.dataset.del), 1); })) return;
             app.render();
           });
         });
@@ -648,7 +758,7 @@ window.Screens = (() => {
       { key: 'maintenanceType', label: 'Tipo (opcional)', type: 'select', options: [{ value: '', label: 'Selecione' }, ...TIPOS], value: t.maintenanceType },
       { key: 'os', label: 'Nº da OS', placeholder: 'Opcional', value: t.os },
       { key: 'tag', label: 'TAG do equipamento', placeholder: 'Ex.: EQ-12 (vai no bloco de OM)', value: t.tag },
-      { key: 'progress', label: 'Execução (%)', type: 'number', placeholder: 'De 0 a 100', value: t.progress ?? '' },
+      { key: 'progress', label: 'Execução (%)', type: 'number', max: 100, step: 1, placeholder: 'De 0 a 100', value: t.progress ?? '' },
       { key: 'area', label: 'Área', placeholder: 'Área', value: t.area },
     ];
     const ler = (valores) => {
@@ -707,7 +817,7 @@ window.Screens = (() => {
           const valores = await sheet({ title: 'Registrar Nova Tarefa', fields: campos(), submit: 'Registrar' });
           const tarefa = valores && ler(valores);
           if (!tarefa) return;
-          Store.update(rdo.id, (d) => { d.tasks.push({ id: Store.uid(), ...tarefa }); });
+          if (!gravar(rdo, (d) => { d.tasks.push({ id: Store.uid(), ...tarefa }); })) return;
           toast('Tarefa registrada.');
           app.render();
         });
@@ -718,7 +828,7 @@ window.Screens = (() => {
             const valores = await sheet({ title: 'Corrigir tarefa', fields: campos(rdo.tasks[i]), submit: 'Salvar' });
             const tarefa = valores && ler(valores);
             if (!tarefa) return;
-            Store.update(rdo.id, (d) => { Object.assign(d.tasks[i], tarefa); });
+            if (!gravar(rdo, (d) => { Object.assign(d.tasks[i], tarefa); })) return;
             app.render();
           });
         });
@@ -728,12 +838,12 @@ window.Screens = (() => {
             const achada = pendencias.find((p) => p.chave === b.dataset.trazer);
             if (!achada) return;
             const t = achada.tarefa;
-            Store.update(rdo.id, (d) => {
+            if (!gravar(rdo, (d) => {
               d.tasks.push({
                 id: Store.uid(), backlogDe: achada.chave, os: t.os || '', tag: t.tag || '', maintenanceType: 'Backlog',
                 description: t.description, progress: Number(t.progress) || 0, area: t.area || '', status: 'Em Andamento',
               });
-            });
+            })) return;
             toast('Pendência trazida. Toque nela para atualizar a execução (%).');
             app.render();
           });
@@ -743,7 +853,7 @@ window.Screens = (() => {
           b.addEventListener('click', async () => {
             const ok = await confirmar('Remover tarefa', 'Remover esta tarefa do relatório?');
             if (!ok) return;
-            Store.update(rdo.id, (d) => { d.tasks.splice(Number(b.dataset.del), 1); });
+            if (!gravar(rdo, (d) => { d.tasks.splice(Number(b.dataset.del), 1); })) return;
             app.render();
           });
         });
@@ -785,14 +895,14 @@ window.Screens = (() => {
           if (!valores.type) { toast('Informe o tipo da ocorrência.'); return; }
           const desc = String(valores.description || '').trim();
           if (!desc) { toast('Informe a descrição da ocorrência.'); return; }
-          Store.update(rdo.id, (d) => {
+          if (!gravar(rdo, (d) => {
             d.occurrences.push({
               type: valores.type,
               description: desc,
               time: valores.time || '',
               location: valores.location || '',
             });
-          });
+          })) return;
           toast('Ocorrência registrada.');
           app.render();
         });
@@ -801,7 +911,7 @@ window.Screens = (() => {
           b.addEventListener('click', async () => {
             const ok = await confirmar('Remover ocorrência', 'Remover esta ocorrência?');
             if (!ok) return;
-            Store.update(rdo.id, (d) => { d.occurrences.splice(Number(b.dataset.del), 1); });
+            if (!gravar(rdo, (d) => { d.occurrences.splice(Number(b.dataset.del), 1); })) return;
             app.render();
           });
         });
@@ -852,10 +962,10 @@ window.Screens = (() => {
           if (!valores.start || !valores.end) { toast('Informe a hora que parou e a que voltou.'); return; }
           if (valores.start === valores.end) { toast('A hora de volta é igual à de parada.'); return; }
           if (!valores.reason) { toast('Informe o motivo da parada.'); return; }
-          Store.update(rdo.id, (d) => {
+          if (!gravar(rdo, (d) => {
             d.stoppages = d.stoppages || [];
             d.stoppages.push({ id: Store.uid(), start: valores.start, end: valores.end, reason: valores.reason, note: valores.note || '' });
-          });
+          })) return;
           toast('Parada registrada.');
           app.render();
         });
@@ -864,7 +974,7 @@ window.Screens = (() => {
           b.addEventListener('click', async () => {
             const ok = await confirmar('Remover parada', 'Remover esta parada do relatório?');
             if (!ok) return;
-            Store.update(rdo.id, (d) => { d.stoppages.splice(Number(b.dataset.del), 1); });
+            if (!gravar(rdo, (d) => { d.stoppages.splice(Number(b.dataset.del), 1); })) return;
             app.render();
           });
         });
@@ -1009,6 +1119,36 @@ window.Screens = (() => {
       <div id="lista-rdo">${listaRdoHtml(atualId)}</div>
     </div>`;
 
+  /*
+   * Abas do RDO escolhido no Gerar Relatório (pedido de 10/11/2026): "RDO Final" é a folha
+   * oficial do cliente; "Relatório de Campo", ao lado, é o relatório padrão do app. A aba
+   * escolhida vale enquanto o app está aberto.
+   */
+  let abaRelatorio = '';   // '' = ainda não escolheu: a conta principal abre no RDO Final, o funcionário no Relatório de Campo
+  const ABAS_RELATORIO = {
+    final: {
+      rotulo: 'RDO Final',
+      texto: 'A folha oficial do cliente (modelo RDO ADM): quatro blocos de OM por folha e o registro fotográfico no fim.',
+      arquivo: (rdo) => `RDO_${rdo.number}.pdf`,
+    },
+    campo: {
+      rotulo: 'Relatório de Campo',
+      texto: 'O relatório padrão do app: identificação e uma tabela por seção, só com o que foi lançado, as etapas do dia e as fotos com a legenda embaixo.',
+      arquivo: (rdo) => `Relatorio_de_Campo_${rdo.number}.pdf`,
+    },
+  };
+  const abaAtual = () => (ABAS_RELATORIO[abaRelatorio] ? abaRelatorio : (window.Conta?.ehMestre?.() ? 'final' : 'campo'));
+
+  /** Botões do PDF da aba escolhida (o painel é redesenhado sozinho ao trocar de aba). */
+  function painelRelatorioHtml() {
+    const aba = ABAS_RELATORIO[abaAtual()];
+    return `
+      <p class="dica">${esc(aba.texto)}</p>
+      <button class="btn block" data-act="enviar-pdf" style="background:#25D366;color:#fff">${icon('whatsapp', 18)}<span>Enviar ${esc(aba.rotulo)} com fotos (WhatsApp)</span></button>
+      <button class="btn primary block" data-act="pdf">${icon('output', 18)}Abrir ${esc(aba.rotulo)} em PDF</button>
+      <button class="btn ghost block" data-act="baixar-pdf">${icon('download', 16)}Baixar ${esc(aba.rotulo)} em PDF</button>`;
+  }
+
   function report(rdo) {
     // sem RDO escolhido, a página mostra só a lista: abrir ou recarregar não abre relatório
     if (!rdo) {
@@ -1030,7 +1170,13 @@ window.Screens = (() => {
       html: `
         ${blocoListaRdo(rdo.id)}
 
-        <div class="section-label">RDO ${esc(rdo.number)} · ${fmtDate(rdo.date)}</div>
+        <div class="section-label" id="rel-topo">RDO ${esc(rdo.number)} · ${fmtDate(rdo.date)}</div>
+        <div class="abas abas-relatorio" role="tablist" aria-label="Formato do relatório">
+          ${Object.entries(ABAS_RELATORIO).map(([chave, aba]) => `
+            <button type="button" class="aba${chave === abaAtual() ? ' ativa' : ''}" role="tab" aria-selected="${chave === abaAtual()}" data-aba-rel="${chave}">${esc(aba.rotulo)}</button>`).join('')}
+        </div>
+        <div id="rel-painel" class="painel-relatorio" role="tabpanel">${painelRelatorioHtml()}</div>
+
         <div class="summary">
           <div class="box"><div class="n">${rdo.workforce.length}</div><div class="t">Mão de obra</div></div>
           <div class="box"><div class="n">${rdo.equipmentList.length}</div><div class="t">Equipamentos</div></div>
@@ -1045,8 +1191,7 @@ window.Screens = (() => {
           <div class="li"><span class="k">Local / Mina</span><span class="v">${esc(rdo.location || '—')}</span></div>
           <div class="li"><span class="k">Clima</span><span class="v">${esc(rdo.weather || '—')}</span></div>
           <div class="li"><span class="k">Supervisor</span><span class="v">${esc(rdo.supervisor || '—')}</span></div>
-          <div class="li"><span class="k">Técnico de Segurança</span><span class="v">${esc(rdo.tst || '—')}</span></div>
-          <div class="li"><span class="k">Horas de equipamento</span><span class="v">${somaHoras}h</span></div>
+          <div class="li"><span class="k">Horas de equipamento</span><span class="v">${String(Math.round(somaHoras * 10) / 10).replace('.', ',')}h</span></div>
           <div class="li"><span class="k">Ocorrências</span><span class="v">${rdo.occurrences.length}</span></div>
         </div>
 
@@ -1061,9 +1206,6 @@ window.Screens = (() => {
           <button class="action-card" data-go="photos">${icon('camera')}Fotos do RDO</button>
         </div>
 
-        <button class="btn block" data-act="enviar-pdf" style="background:#25D366;color:#fff">${icon('whatsapp', 18)}<span>Enviar PDF com fotos (WhatsApp)</span></button>
-        <button class="btn primary block" data-act="pdf">${icon('output', 18)}Abrir PDF com fotos</button>
-        <button class="btn ghost block" data-act="baixar-pdf">${icon('download', 16)}Baixar o PDF</button>
         <button class="btn ghost block" data-act="whats">${icon('whatsapp', 16)}Enviar só o texto pelo WhatsApp</button>
         <button class="btn ghost block" data-act="copiar">${icon('copy', 16)}Copiar resumo em texto</button>
         ${window.Conta?.ativo?.() ? `<button class="btn ghost block" data-act="central">${icon('upload', 16)}Enviar para a central</button>` : ''}
@@ -1078,86 +1220,116 @@ window.Screens = (() => {
 
         // pedido de 09/11/2026: escolher o RDO aqui mesmo; troca o RDO e fica no Gerar Relatório
         ligarListaRdo(root, (id) => {
-          if (id === rdo.id) return;
+          if (id === rdo.id) {
+            // já é o RDO aberto: só leva a tela até as abas dele
+            root.querySelector('#rel-topo')?.scrollIntoView({ block: 'start' });
+            return;
+          }
           app.abrir(id);
           const aberto = Store.find(id);
           if (aberto) toast(`RDO ${aberto.number} aberto.`);
         }, rdo.id);
 
-        root.querySelector('[data-act="pdf"]').addEventListener('click', async (e) => {
-          const btn = e.currentTarget;
-          btn.disabled = true;
-          // no navegador a aba abre já no toque: depois do await o navegador bloqueia
-          const nativo = window.Capacitor?.isNativePlatform?.() === true;
-          const janela = nativo ? null : window.open('', '_blank');
-          try {
-            const r = await window.Pdf.abrir(rdo, janela);
-            if (janela && r !== 'aberto') janela.close();
-            if (r === 'aberto') toast(`RDO_${rdo.number}.pdf aberto.`);
-            else if (r === 'compartilhado') toast('Escolha o visualizador de PDF no compartilhar do aparelho.');
-            else if (r === 'baixado') toast('O navegador bloqueou a aba nova: o PDF foi baixado.');
-            else if (r === 'salvo') toast(`RDO_${rdo.number}.pdf gravado no aparelho.`);
-          } catch (err) {
-            toast('Não foi possível abrir o PDF.');
-          } finally {
-            btn.disabled = false;
-          }
-        });
+        // ---- abas RDO Final / Relatório de Campo: cada uma com os botões do PDF dela
+        const painel = root.querySelector('#rel-painel');
+        const ligarPainel = () => {
+          const formato = abaAtual();
+          const opcoes = { formato };
+          const aba = ABAS_RELATORIO[formato];
+          const arquivo = aba.arquivo(rdo);
 
-        root.querySelector('[data-act="baixar-pdf"]').addEventListener('click', async (e) => {
-          const btn = e.currentTarget;
-          btn.disabled = true;
-          try {
-            const r = await window.Pdf.gerar(rdo);
-            if (r !== 'cancelado') toast(`RDO_${rdo.number}.pdf gerado${rdo.photos.length ? ` com ${rdo.photos.length} foto(s)` : ''}.`);
-          } catch (err) {
-            toast('Não foi possível gerar o PDF.');
-          } finally {
-            btn.disabled = false;
-          }
-        });
-
-        // PDF com as fotos pelo compartilhar do aparelho (escolher WhatsApp).
-        // 1º toque monta o PDF; 2º toque compartilha (o Safari só deixa dentro de um toque).
-        const btnEnviar = root.querySelector('[data-act="enviar-pdf"]');
-        const rotulo = btnEnviar.querySelector('span');
-        let pronto = null;
-        const legenda = `RDO ${rdo.number} - ${fmtDate(rdo.date)}${rdo.location ? ` - ${rdo.location}` : ''}`;
-        const depois = (r) => {
-          if (r === 'compartilhado') toast('PDF enviado para o compartilhar.');
-          if (r === 'baixado') toast('Este navegador não compartilha arquivo: o PDF foi baixado para anexar no WhatsApp.');
-        };
-        btnEnviar.addEventListener('click', async () => {
-          if (pronto) {
-            const p = pronto;
-            pronto = null;
-            rotulo.textContent = 'Enviar PDF com fotos (WhatsApp)';
-            p.enviar(legenda).then(depois, () => toast('Não foi possível compartilhar o PDF.'));
-            return;
-          }
-          btnEnviar.disabled = true;
-          rotulo.textContent = 'Montando o PDF...';
-          try {
-            const p = await window.Pdf.preparar(rdo);
-            if (window.Capacitor?.isNativePlatform?.()) {
-              rotulo.textContent = 'Enviar PDF com fotos (WhatsApp)';
-              depois(await p.enviar(legenda));
-            } else {
-              pronto = p;
-              rotulo.textContent = 'PDF pronto: toque para enviar';
+          painel.querySelector('[data-act="pdf"]').addEventListener('click', async (e) => {
+            const btn = e.currentTarget;
+            btn.disabled = true;
+            // no navegador a aba abre já no toque: depois do await o navegador bloqueia
+            const nativo = window.Capacitor?.isNativePlatform?.() === true;
+            const janela = nativo ? null : window.open('', '_blank');
+            try {
+              const r = await window.Pdf.abrir(rdo, janela, opcoes);
+              if (janela && r !== 'aberto') janela.close();
+              if (r === 'aberto') toast(`${arquivo} aberto.`);
+              else if (r === 'compartilhado') toast('Escolha o visualizador de PDF no compartilhar do aparelho.');
+              else if (r === 'baixado') toast('O navegador bloqueou a aba nova: o PDF foi baixado.');
+              else if (r === 'salvo') toast(`${arquivo} gravado no aparelho.`);
+            } catch (err) {
+              // a aba em branco aberta no toque não fica sobrando quando o PDF falha
+              try { if (janela && !janela.closed) janela.close(); } catch { /* aba já fechada */ }
+              toast('Não foi possível abrir o PDF.');
+            } finally {
+              btn.disabled = false;
             }
-          } catch {
-            rotulo.textContent = 'Enviar PDF com fotos (WhatsApp)';
-            toast('Não foi possível gerar o PDF.');
-          } finally {
-            btnEnviar.disabled = false;
-          }
-        });
+          });
+
+          painel.querySelector('[data-act="baixar-pdf"]').addEventListener('click', async (e) => {
+            const btn = e.currentTarget;
+            btn.disabled = true;
+            try {
+              const r = await window.Pdf.gerar(rdo, opcoes);
+              if (r !== 'cancelado') toast(`${arquivo} gerado${rdo.photos.length ? ` com ${rdo.photos.length} foto(s)` : ''}.`);
+            } catch (err) {
+              toast('Não foi possível gerar o PDF.');
+            } finally {
+              btn.disabled = false;
+            }
+          });
+
+          // PDF com as fotos pelo compartilhar do aparelho (escolher WhatsApp).
+          // 1º toque monta o PDF; 2º toque compartilha (o Safari só deixa dentro de um toque).
+          const btnEnviar = painel.querySelector('[data-act="enviar-pdf"]');
+          const rotulo = btnEnviar.querySelector('span');
+          const textoBotao = `Enviar ${aba.rotulo} com fotos (WhatsApp)`;
+          let pronto = null;
+          const legenda = `${aba.rotulo} — RDO ${rdo.number} - ${fmtDate(rdo.date)}${rdo.location ? ` - ${rdo.location}` : ''}`;
+          const depois = (r) => {
+            if (r === 'compartilhado') toast('PDF enviado para o compartilhar.');
+            if (r === 'baixado') toast('Este navegador não compartilha arquivo: o PDF foi baixado para anexar no WhatsApp.');
+          };
+          btnEnviar.addEventListener('click', async () => {
+            if (pronto) {
+              const p = pronto;
+              pronto = null;
+              rotulo.textContent = textoBotao;
+              p.enviar(legenda).then(depois, () => toast('Não foi possível compartilhar o PDF.'));
+              return;
+            }
+            btnEnviar.disabled = true;
+            rotulo.textContent = 'Montando o PDF...';
+            try {
+              const p = await window.Pdf.preparar(rdo, opcoes);
+              if (window.Capacitor?.isNativePlatform?.()) {
+                rotulo.textContent = textoBotao;
+                depois(await p.enviar(legenda));
+              } else {
+                pronto = p;
+                rotulo.textContent = 'PDF pronto: toque para enviar';
+              }
+            } catch {
+              rotulo.textContent = textoBotao;
+              toast('Não foi possível gerar o PDF.');
+            } finally {
+              btnEnviar.disabled = false;
+            }
+          });
+        };
+
+        const botoesAba = [...root.querySelectorAll('[data-aba-rel]')];
+        botoesAba.forEach((b) => b.addEventListener('click', () => {
+          if (b.dataset.abaRel === abaAtual()) return;
+          abaRelatorio = b.dataset.abaRel;
+          botoesAba.forEach((x) => {
+            x.classList.toggle('ativa', x === b);
+            x.setAttribute('aria-selected', String(x === b));
+          });
+          // só o painel muda: a tela não pula para o topo
+          painel.innerHTML = painelRelatorioHtml();
+          ligarPainel();
+        }));
+        ligarPainel();
 
         root.querySelector('[data-act="whats"]').addEventListener('click', async () => {
           const valores = await sheet({
             title: 'Enviar só o texto',
-            text: 'O texto resumido do RDO será aberto no WhatsApp (sem as fotos; para mandar as fotos use "Enviar PDF com fotos"). Deixe o número em branco para escolher o contato no aplicativo.',
+            text: 'O texto resumido do RDO será aberto no WhatsApp (sem as fotos; para mandar as fotos use o botão "Enviar ... com fotos" da aba). Deixe o número em branco para escolher o contato no aplicativo.',
             fields: [
               { key: 'telefone', label: 'Número com DDD (opcional)', placeholder: 'Ex.: 18997123456' },
             ],
@@ -1172,10 +1344,10 @@ window.Screens = (() => {
           const ok = await confirmar('Finalizar RDO',
             `Finalizar o RDO ${rdo.number}? Ele fica só para leitura (dá para reabrir depois em Gerar Relatório).`, 'Finalizar');
           if (!ok) return;
-          Store.update(rdo.id, (d) => { d.status = 'final'; d.finalizedAt = new Date().toISOString(); });
+          if (!gravar(rdo, (d) => { d.status = 'final'; d.finalizedAt = new Date().toISOString(); })) return;
           toast(`RDO ${rdo.number} finalizado.`);
           // com conta na central, o RDO finalizado sobe na hora (se houver internet)
-          window.Conta?.enviarTudo?.({ silencioso: true }).catch(() => {});
+          window.Conta?.enviarTudo?.({ silencioso: true, completo: false }).catch(() => {});
           app.render();
         });
 
@@ -1183,7 +1355,7 @@ window.Screens = (() => {
           const ok = await confirmar('Reabrir RDO',
             `Reabrir o RDO ${rdo.number} para mudar? Se ele já foi enviado, mande o PDF de novo depois.`, 'Reabrir');
           if (!ok) return;
-          Store.update(rdo.id, (d) => { d.status = 'draft'; d.finalizedAt = null; });
+          if (!gravar(rdo, (d) => { d.status = 'draft'; d.finalizedAt = null; })) return;
           toast(`RDO ${rdo.number} reaberto.`);
           app.render();
         });
@@ -1191,11 +1363,11 @@ window.Screens = (() => {
         root.querySelector('[data-act="central"]')?.addEventListener('click', async (ev) => {
           const btn = ev.currentTarget;
           btn.disabled = true;
-          try {
-            await window.Conta.enviarTudo();
-            toast(`RDO ${rdo.number} (e os outros deste aparelho) enviado para a central.`);
-          } catch (e) { toast(e.message); }
+          // antes o aviso dizia "enviado" mesmo sem internet ou com o banco recusando
+          const r = await window.Conta.enviarTudo({ silencioso: true }).catch((e) => ({ erro: e.message }));
           btn.disabled = false;
+          toast(avisoDoEnvio(r, rdo));
+          app.render();
         });
 
         root.querySelector('[data-act="copiar"]').addEventListener('click', async () => {
@@ -1210,6 +1382,20 @@ window.Screens = (() => {
         });
       },
     };
+  }
+
+  /** O que dizer depois de "Enviar para a central": o que aconteceu de verdade com o envio. */
+  function avisoDoEnvio(r, rdo) {
+    if (r?.erro) return r.erro;
+    if (r?.semBanco) return 'O banco na nuvem não está ligado neste app.';
+    if (r?.semRede) return 'Sem internet agora. O RDO fica guardado e sobe sozinho quando a rede voltar.';
+    if (r?.semSessao) return 'Entre de novo na conta para enviar ao banco.';
+    if (r?.ocupado) return 'O envio já está em andamento. Aguarde um instante.';
+    const recusado = rdo && (window.Conta?.comErro?.() || []).find((x) => x.id === rdo.id);
+    if (recusado) return `O banco recusou o RDO ${rdo.number}: ${recusado.erro}`;
+    const naFila = (window.Conta?.pendentes?.() || []).length;
+    if (naFila) return `${naFila} RDO(s) ainda aguardando envio; o app continua tentando.`;
+    return rdo ? `RDO ${rdo.number} está no banco (e os outros deste aparelho também).` : 'Tudo enviado para o banco.';
   }
 
   // -------------------------------------------------------------- apagar relatórios
@@ -1255,14 +1441,32 @@ window.Screens = (() => {
               const rdo = Store.find(b.dataset.del);
               if (!rdo) return;
               const fotos = rdo.photos.length ? ` e as ${rdo.photos.length} foto(s) dele` : '';
-              const ok = await confirmar(
-                'Apagar relatório',
-                `Apagar o RDO ${rdo.number} de ${fmtDate(rdo.date)}${fotos}? A exclusão é definitiva e não pode ser desfeita.`,
-                'Apagar',
-              );
-              if (!ok) return;
-              if (!Store.remove(rdo.id)) { toast('Não foi possível apagar o relatório.'); return; }
-              toast(`RDO ${rdo.number} apagado.`);
+              // RDO de outra pessoa aberto neste aparelho (conta principal): tirar a cópia daqui
+              // não pode, sem aviso, apagar do banco o RDO que a pessoa fez
+              const meu = window.Conta?.usuario?.()?.id;
+              let soLocal = false;
+              if (rdo.dono && meu && rdo.dono !== meu) {
+                const dono = rdo.donoNome || 'outra pessoa';
+                const escolha = await UI.escolher(
+                  `RDO ${rdo.number} é de ${dono}`,
+                  `Este RDO foi lançado por ${dono} e está aqui porque você abriu. "Tirar só deste aparelho" libera espaço e deixa o RDO no banco e no celular de ${dono}. "Apagar do banco também" some com ele para todos e não pode ser desfeito.`,
+                  [
+                    { valor: 'local', rotulo: 'Tirar só deste aparelho', classe: 'primary' },
+                    { valor: 'banco', rotulo: 'Apagar do banco também', classe: 'danger' },
+                  ],
+                );
+                if (!escolha) return;
+                soLocal = escolha === 'local';
+              } else {
+                const ok = await confirmar(
+                  'Apagar relatório',
+                  `Apagar o RDO ${rdo.number} de ${fmtDate(rdo.date)}${fotos}? A exclusão é definitiva e não pode ser desfeita.`,
+                  'Apagar',
+                );
+                if (!ok) return;
+              }
+              if (!Store.remove(rdo.id, { soLocal })) { toast('Não foi possível apagar o relatório.'); return; }
+              toast(soLocal ? `RDO ${rdo.number} saiu deste aparelho. No banco ele continua.` : `RDO ${rdo.number} apagado.`);
               app.render();
             });
           });
@@ -1446,19 +1650,23 @@ window.Screens = (() => {
           },
         });
 
+        // O botão fica guardado numa variável: depois do await o `ev.currentTarget` não existe
+        // mais, o código quebrava ali e o botão ficava desligado até redesenhar a tela.
         root.querySelector('[data-act="central-enviar"]')?.addEventListener('click', async (ev) => {
-          ev.currentTarget.disabled = true;
-          try { await window.Conta.enviarTudo(); } catch (e) { toast(e.message); }
-          ev.currentTarget.disabled = false;
+          const btn = ev.currentTarget;
+          btn.disabled = true;
+          const r = await window.Conta.enviarTudo({ silencioso: true }).catch((e) => ({ erro: e.message }));
+          btn.disabled = false;
+          toast(avisoDoEnvio(r));
         });
         root.querySelector('[data-act="central-baixar"]')?.addEventListener('click', async (ev) => {
-          ev.currentTarget.disabled = true;
-          try {
-            const n = await window.Conta.recuperar();
-            toast(n ? `${n} RDO(s) vieram da central.` : 'Tudo o que está na central já está aqui.');
-            if (n) app.render();
-          } catch (e) { toast(e.message); }
-          ev.currentTarget.disabled = false;
+          const btn = ev.currentTarget;
+          btn.disabled = true;
+          const r = await window.Conta.sincronizar({ silencioso: true }).catch((e) => ({ erro: e.message }));
+          btn.disabled = false;
+          if (r.erro || r.semRede || r.semSessao || r.semBanco || r.ocupado) { toast(avisoDoEnvio(r)); return; }
+          toast(r.recebidos ? `${r.recebidos} RDO(s) vieram da central.` : 'Tudo o que está na central já está aqui.');
+          if (r.recebidos) app.render();
         });
 
         const input = root.querySelector('#copia-input');
@@ -1507,11 +1715,18 @@ window.Screens = (() => {
 
   const controle = (rdo) => (window.Mestre && window.Conta?.ehMestre?.() ? window.Mestre.controle(app) : home(rdo));
 
-  const mapa = { home, header, etapas, workforce, equipment, tasks, occurrences, stops, photos, report, reports, backup, month, roster, conta, equipe, controle };
+  // página de sair (pedido de 10/11/2026): confirma e leva para a tela de entrar
+  const sair = () => window.Conta.telaSair();
+
+  const mapa = { home, header, etapas, workforce, equipment, tasks, occurrences, stops, photos, report, reports, backup, month, roster, conta, equipe, controle, sair };
 
   return {
     boot(appRef) { app = appRef; },
     get(tela) { return mapa[tela] || home; },
+    /** Chamado quando o usuário chega numa tela (não a cada redesenho): as listas do banco se renovam. */
+    aoEntrar(tela) {
+      if (tela === 'equipe' || tela === 'controle') window.Mestre?.aoEntrar?.(tela);
+    },
     TITULOS,
   };
 })();

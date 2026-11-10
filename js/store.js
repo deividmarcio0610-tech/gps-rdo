@@ -7,6 +7,21 @@ window.Store = (() => {
   // Sem conta, fica a chave antiga, para os RDOs que já estavam no aparelho não sumirem.
   let contaId = null;
   const chave = () => (contaId ? `${KEY}:${contaId}` : KEY);
+  // qual conta ficou com os RDOs que já estavam no aparelho antes de existir conta
+  const CHAVE_ADOCAO = `${KEY}:adotado_por`;
+
+  /** Outra conta que já tem RDOs guardados neste aparelho ('' se não houver). */
+  function outraContaNoAparelho() {
+    try {
+      for (let i = 0; i < (localStorage.length || 0); i += 1) {
+        const k = localStorage.key(i) || '';
+        if (!k.startsWith(`${KEY}:`) || k === CHAVE_ADOCAO || k.endsWith(':rev')) continue;
+        const id = k.slice(KEY.length + 1);
+        if (id && id !== contaId) return id;
+      }
+    } catch { /* aparelho sem acesso à lista de chaves: segue como se não houvesse outra */ }
+    return '';
+  }
 
   /*
    * Etapas do dia, na ordem do formulário "RDO ADM" do cliente (modelo de 09/11/2026).
@@ -23,14 +38,87 @@ window.Store = (() => {
     'HORÁRIO DE ALMOÇO/JANTA',
   ];
   /*
-   * Horários padrão da grade do modelo "RDO ADM". O formulário do funcionário continua
-   * em branco (modelo antigo); o PDF final usa estes valores quando a etapa não tem hora.
+   * Horários fixos da grade do modelo "RDO ADM" do cliente (conferidos na planilha, L8:M15).
+   * Desde 10/11/2026 a tela Etapas do Dia já abre com eles; o RDO guarda o que for salvo lá,
+   * e a etapa que ficou em branco vale por estes valores.
    */
   const HORAS_MODELO = [
     ['07:45', '08:00'], ['08:00', '08:05'], ['08:05', '08:15'], ['08:15', '09:25'],
     ['09:25', '09:27'], ['09:27', '09:30'], ['09:30', '15:30'], ['11:00', '12:00'],
   ];
   const etapasVazias = () => ETAPAS.map(() => ({ inicio: '', fim: '' }));
+
+  // Etapa 7 da lista (posição 6): a execução da atividade. É do fim dela que sai o tempo de bloqueio.
+  const ETAPA_EXECUCAO = 6;
+
+  /**
+   * Horas de cada etapa como valem no RDO: o que foi digitado ou, na etapa que ficou em
+   * branco, o horário fixo do modelo do cliente (pedido de 10/11/2026: a tela Etapas do Dia
+   * já vem com esses valores). Aqui ainda não entra o desconto do bloqueio.
+   */
+  function etapasDoRdo(rdo) {
+    const guardadas = Array.isArray(rdo?.etapas) ? rdo.etapas : [];
+    return ETAPAS.map((_, i) => {
+      const inicio = String(guardadas[i]?.inicio || '');
+      const fim = String(guardadas[i]?.fim || '');
+      return inicio || fim ? { inicio, fim } : { inicio: HORAS_MODELO[i][0], fim: HORAS_MODELO[i][1] };
+    });
+  }
+
+  /**
+   * A conta do bloqueio (pedido de 10/11/2026: lançado em Etapas do Dia, o desconto é
+   * automático e a hora tem de bater). O tempo parado sai do fim da execução:
+   *   fim com desconto = início da execução + (duração da execução − duração do bloqueio)
+   * Vale para turno que vira a meia-noite, na execução e no bloqueio.
+   * Devolve null quando o bloqueio não tem as duas horas. `cabe` é falso quando o bloqueio é
+   * maior que a execução; `execucao` é null quando a execução não tem as duas horas (aí não
+   * há de onde descontar e `fimAjustado` repete o fim informado).
+   */
+  function contaDoBloqueio(inicioExecucao, fimExecucao, bloqueio) {
+    const b = bloqueio || {};
+    const bi = minutosDe(b.inicio);
+    const bf = minutosDe(b.fim);
+    if (bi == null || bf == null || bi === bf) return null;
+    const minutos = bf > bi ? bf - bi : bf + 1440 - bi;
+    const conta = {
+      inicio: hhmmDe(bi),
+      fim: hhmmDe(bf),
+      motivo: String(b.motivo || '').trim(),
+      minutos,
+      baseFim: String(fimExecucao || ''),
+      fimAjustado: String(fimExecucao || ''),
+      execucao: null,
+      cabe: true,
+    };
+    const ini = minutosDe(inicioExecucao);
+    const fim = minutosDe(fimExecucao);
+    if (ini == null || fim == null) return conta;
+    const execucao = fim >= ini ? fim - ini : fim + 1440 - ini;
+    conta.execucao = execucao;
+    conta.cabe = minutos <= execucao;
+    conta.fimAjustado = hhmmDe(ini + Math.max(0, execucao - minutos));
+    return conta;
+  }
+
+  /** Bloqueio do RDO com a conta feita contra a execução dele (null se não há bloqueio). */
+  function bloqueioDoRdo(rdo) {
+    const execucao = etapasDoRdo(rdo)[ETAPA_EXECUCAO];
+    return contaDoBloqueio(execucao.inicio, execucao.fim, rdo?.bloqueio);
+  }
+
+  /** Etapas para os relatórios: as horas do RDO e, havendo bloqueio, o fim da execução já descontado. */
+  function etapasComDesconto(rdo) {
+    const etapas = etapasDoRdo(rdo);
+    const conta = contaDoBloqueio(etapas[ETAPA_EXECUCAO].inicio, etapas[ETAPA_EXECUCAO].fim, rdo?.bloqueio);
+    if (conta) etapas[ETAPA_EXECUCAO] = { inicio: etapas[ETAPA_EXECUCAO].inicio, fim: conta.fimAjustado };
+    return etapas;
+  }
+
+  /** Frase do bloqueio para as observações do RDO Final ('' quando não há bloqueio). */
+  function fraseDoBloqueio(conta) {
+    if (!conta) return '';
+    return `Parado por espera no bloqueio das ${conta.inicio} às ${conta.fim} (${fmtHoras(conta.minutos)})${conta.motivo ? ` — ${conta.motivo}` : ''}.`;
+  }
 
   /*
    * Equipe fixa (pedido do usuário em 07/11/2026): aparece sempre para escolher na Mão de
@@ -79,24 +167,62 @@ window.Store = (() => {
 
   let db = read();
 
+  /*
+   * Mais de uma aba: Gerar Relatório e Controle de RDO abrem em aba própria, e cada aba tem a
+   * sua cópia dos RDOs na memória. Sem cuidado, a aba que ficou para trás gravava a cópia
+   * velha por cima do que a outra tinha acabado de salvar. Cada gravação troca este carimbo;
+   * quem vai mexer confere o carimbo antes e, se outra aba gravou, relê do aparelho primeiro.
+   */
+  const chaveRev = () => `${chave()}:rev`;
+  const lerRev = () => {
+    try { return localStorage.getItem(chaveRev()) || ''; } catch { return ''; }
+  };
+  let revVista = lerRev();
+
+  /** Outra aba gravou depois desta? Relê os dados do aparelho. Devolve true se releu. */
+  function recarregarSeMudou() {
+    const rev = lerRev();
+    if (rev === revVista) return false;
+    revVista = rev;
+    db = read();
+    return true;
+  }
+
+  /**
+   * Quem lançou o RDO: só nome, função e e-mail. A foto do rosto e a assinatura ficam na
+   * conta, uma vez só. Antes iam copiadas dentro de cada RDO (50 a 100 KB cada): com poucas
+   * dezenas de RDOs o aparelho enchia e o app parava de gravar.
+   */
+  function enxugar(r) {
+    if (r && r.autor && typeof r.autor === 'object') {
+      r.autor = {
+        nome: String(r.autor.nome || ''),
+        funcao: String(r.autor.funcao || ''),
+        email: String(r.autor.email || ''),
+      };
+    }
+    return r;
+  }
+
   /**
    * Completa um RDO vindo do aparelho ou do banco com o que a versão antiga não tinha:
    * etapas do dia sempre com as 8 linhas certas e os campos do cabeçalho como texto.
    */
   function completo(r) {
-    const x = { stoppages: [], ...r };
+    const x = enxugar({ stoppages: [], ...r });
+    // listas sempre como lista: um RDO torto vindo do banco não derruba as telas
+    for (const k of ['workforce', 'equipmentList', 'tasks', 'occurrences', 'stoppages', 'photos']) {
+      if (!Array.isArray(x[k])) x[k] = [];
+    }
     const guardadas = Array.isArray(x.etapas) ? x.etapas : [];
     x.etapas = ETAPAS.map((_, i) => ({ inicio: '', fim: '', ...(guardadas[i] || {}) }));
-    // bloqueio do dia: { inicio, fim, motivo }; baseFim/fimAjustado guardam o desconto
-    x.bloqueio = x.bloqueio && typeof x.bloqueio === 'object'
-      ? {
-        inicio: String(x.bloqueio.inicio || ''),
-        fim: String(x.bloqueio.fim || ''),
-        motivo: String(x.bloqueio.motivo || ''),
-        baseFim: String(x.bloqueio.baseFim || ''),
-        fimAjustado: String(x.bloqueio.fimAjustado || ''),
-      }
+    // Bloqueio do dia, lançado em Etapas do Dia: { inicio, fim, motivo }. O fim da execução
+    // com o desconto não é guardado: é sempre calculado (contaDoBloqueio), para a hora não
+    // ficar descontada duas vezes nem velha depois de uma edição.
+    const bq = x.bloqueio && typeof x.bloqueio === 'object'
+      ? { inicio: String(x.bloqueio.inicio || ''), fim: String(x.bloqueio.fim || ''), motivo: String(x.bloqueio.motivo || '') }
       : null;
+    x.bloqueio = bq && (bq.inicio || bq.fim || bq.motivo) ? bq : null;
     for (const k of ['cliente', 'complexo', 'gerencia', 'equipeCoord', 'objeto', 'contractName', 'location', 'maintenanceType', 'shift', 'weather', 'startTime', 'endTime', 'supervisor', 'tst', 'notes']) {
       if (typeof x[k] !== 'string') x[k] = '';
     }
@@ -128,17 +254,29 @@ window.Store = (() => {
   }
 
   function save() {
+    const novaRev = `${Date.now().toString(36)}-${uid()}`;
     try {
+      // o carimbo vai antes: se os dados não couberem, as outras abas só releem à toa
+      localStorage.setItem(chaveRev(), novaRev);
       localStorage.setItem(chave(), JSON.stringify(db));
     } catch {
       return false;
     }
+    revVista = novaRev;
     // com conta na central, o que foi gravado sobe sozinho quando houver internet
     window.Conta?.agendar?.();
     return true;
   }
 
-  const uid = () => Math.random().toString(36).slice(2, 11);
+  // 9 caracteres em base36. Math.random().toString(36) às vezes devolve menos casas
+  // (número "redondo"), e o id saía curto; aqui o tamanho é sempre o mesmo.
+  const ALFABETO = '0123456789abcdefghijklmnopqrstuvwxyz';
+  function uid() {
+    const bytes = new Uint8Array(9);
+    if (globalThis.crypto?.getRandomValues) globalThis.crypto.getRandomValues(bytes);
+    else for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+    return Array.from(bytes, (b) => ALFABETO[b % 36]).join('');
+  }
 
   /** AAAAMMDD-NN, contador por dia. Conta também números de RDOs já apagados. */
   function nextNumber(dateIso) {
@@ -184,7 +322,7 @@ window.Store = (() => {
       equipeCoord: '',  // EQUIPE / COORDENAÇÃO
       objeto: '',
       etapas: etapasVazias(),  // horas de início e fim de cada etapa do dia
-      bloqueio: null,  // { inicio, fim, motivo, baseFim, fimAjustado }
+      bloqueio: null,  // { inicio, fim, motivo }, lançado em Etapas do Dia
       location: '',  // local / mina digitado à mão no cabeçalho
       maintenanceType: '',  // Preventiva, Corretiva ou Backlog (escolhido no cabeçalho)
       shift: '',
@@ -208,7 +346,8 @@ window.Store = (() => {
   /** HH:MM → minutos do dia (null quando não é hora). */
   function minutosDe(hhmm) {
     const [h, m] = String(hhmm || '').split(':').map(Number);
-    return Number.isInteger(h) && Number.isInteger(m) ? h * 60 + m : null;
+    // hora fora de 00:00–23:59 (dado torto vindo do banco) não é hora
+    return Number.isInteger(h) && Number.isInteger(m) && h >= 0 && h <= 23 && m >= 0 && m <= 59 ? h * 60 + m : null;
   }
 
   /** Minutos de uma parada (HH:MM → HH:MM); passa da meia-noite se o fim for menor. */
@@ -239,6 +378,12 @@ window.Store = (() => {
     uid,
     ETAPAS,
     HORAS_MODELO,
+    ETAPA_EXECUCAO,
+    etapasDoRdo,
+    contaDoBloqueio,
+    bloqueioDoRdo,
+    etapasComDesconto,
+    fraseDoBloqueio,
     completo,
     todayIso,
     minutosDe,
@@ -249,23 +394,27 @@ window.Store = (() => {
     emptyRdo,
     save,
 
+    recarregarSeMudou,
+
     setDarkMode(on) {
+      recarregarSeMudou();
       db.config.darkMode = Boolean(on);
       save();
     },
 
     /** Modo campo: letra e botões maiores, mais contraste (sol, luva). */
     setModoCampo(on) {
+      recarregarSeMudou();
       db.config.modoCampo = Boolean(on);
       save();
     },
 
     /**
-     * Cria um RDO já persistido (botão Novo RDO). A assinatura do formulário é a foto do
-     * rosto da conta que preenche (cadastro): vai congelada no RDO, para o PDF e o
-     * supervisor verem quem lançou.
+     * Cria um RDO já persistido (botão Novo RDO). Guarda quem lançou (nome, função e
+     * e-mail da conta); a foto do rosto e a assinatura ficam só na conta.
      */
     createRdo() {
+      recarregarSeMudou();
       const rdo = emptyRdo();
       const conta = window.Conta?.usuario?.() || null;
       if (conta) {
@@ -273,16 +422,16 @@ window.Store = (() => {
           nome: conta.nome || '',
           funcao: conta.funcao || '',
           email: conta.email || '',
-          foto: conta.facial || '',
-          // assinatura desenhada no cadastro: vai no campo "Ass:" do supervisor no PDF
-          assinatura: conta.assinatura || '',
         };
       }
       marcarNumero(rdo.number);
       db.rdos.unshift(rdo);
-      save();
-      // com conta na central, o RDO novo sobe assim que houver rede
-      window.Conta?.agendar?.();
+      // save() já agenda o envio para o banco
+      if (!save()) {
+        // não coube: o RDO não fica só na memória para sumir ao reabrir
+        db.rdos = db.rdos.filter((r) => r.id !== rdo.id);
+        return null;
+      }
       return rdo;
     },
 
@@ -306,6 +455,7 @@ window.Store = (() => {
 
     /** Acrescenta alguém à equipe (fica no aparelho). Devolve false se já existe na mesma equipe. */
     adicionarPessoa(name, team, role = '') {
+      recarregarSeMudou();
       const nome = String(name || '').trim();
       const equipe = String(team || '').trim() || 'Outros';
       if (!nome) return false;
@@ -319,6 +469,7 @@ window.Store = (() => {
 
     /** Tira do cadastro alguém acrescentado. A equipe fixa não sai. */
     removerPessoa(id) {
+      recarregarSeMudou();
       const antes = (db.employees || []).length;
       db.employees = (db.employees || []).filter((e) => e.id !== id);
       return db.employees.length < antes && save();
@@ -331,17 +482,28 @@ window.Store = (() => {
       return numero;
     },
 
-    /** Apaga o RDO de vez, com as fotos. Não há lixeira. */
-    remove(id) {
+    /**
+     * Apaga o RDO de vez, com as fotos. Não há lixeira.
+     * `soLocal`: tira só a cópia deste aparelho e deixa o banco como está (a conta principal
+     * usa para limpar do aparelho dela o RDO de outra pessoa, sem apagar o RDO da pessoa).
+     */
+    remove(id, { soLocal = false } = {}) {
+      recarregarSeMudou();
       const rdo = db.rdos.find((r) => r.id === id);
       if (!rdo) return false;
+      const antes = { rdos: db.rdos, ultimos: { ...(db.ultimos || {}) } };
       marcarNumero(rdo.number);
       db.rdos = db.rdos.filter((r) => r.id !== id);
+      if (!save()) {
+        // não gravou: o RDO continua no aparelho, então fotos e banco ficam como estão
+        db.rdos = antes.rdos;
+        db.ultimos = antes.ultimos;
+        return false;
+      }
       window.Fotos?.remover(rdo.photos);
       // apagado no aparelho, sai do banco na nuvem também (o dono ou a conta principal)
-      window.Conta?.apagarNaNuvem?.(rdo);
-      window.Conta?.agendar?.();
-      return save();
+      if (!soLocal) window.Conta?.apagarNaNuvem?.(rdo);
+      return true;
     },
 
     /**
@@ -349,6 +511,7 @@ window.Store = (() => {
      * está; os outros entram. Devolve quantos entraram ou -1 se não coube.
      */
     importar(rdos, ultimos = {}) {
+      recarregarSeMudou();
       const antes = { rdos: db.rdos.slice(), ultimos: { ...(db.ultimos || {}) } };
       const novos = (Array.isArray(rdos) ? rdos : [])
         .filter((r) => r && r.id && !db.rdos.some((x) => x.id === r.id))
@@ -412,32 +575,63 @@ window.Store = (() => {
       const novo = id ? String(id) : '';
       if (novo === (contaId || '')) return;
       contaId = novo || null;
+      // Os RDOs que já estavam no aparelho (de antes das contas) passam para UMA conta só: a
+      // primeira que entrar. Antes, toda conta nova que entrasse neste aparelho levava uma
+      // cópia deles e mandava para o banco como se fossem dela.
+      let adotante = false;
       if (contaId) {
         try {
-          const propria = localStorage.getItem(chave());
+          let dono = localStorage.getItem(CHAVE_ADOCAO);
           const antiga = localStorage.getItem(KEY);
-          if (!propria && antiga) localStorage.setItem(chave(), antiga);
+          if (!dono && antiga) {
+            // aparelho de antes desta marca: quem já tem dados aqui adotou naquela época
+            const propria = localStorage.getItem(chave());
+            dono = propria ? contaId : (outraContaNoAparelho() || contaId);
+            if (dono === contaId && !propria) localStorage.setItem(chave(), antiga);
+            localStorage.setItem(CHAVE_ADOCAO, dono);
+          }
+          adotante = dono === contaId;
         } catch { /* sem espaço para copiar: começa vazio, os RDOs seguem na chave antiga */ }
       }
       db = read();
+      revVista = lerRev();
       // as fotos seguem a mesma conta: cada banco do IndexedDB é de um dono só
-      window.Fotos?.usarConta?.(contaId || '', { adotar: true });
+      window.Fotos?.usarConta?.(contaId || '', { adotar: adotante });
+    },
+
+    /**
+     * Anota no RDO algo que só interessa a este aparelho (campos com "_" na frente, que não
+     * sobem para o banco). Não mexe no carimbo: a anotação não conta como edição do RDO.
+     */
+    anotar(id, campos) {
+      recarregarSeMudou();
+      const rdo = db.rdos.find((r) => r.id === id);
+      if (!rdo) return false;
+      Object.assign(rdo, campos);
+      return save();
     },
 
     /** Salva alterações de um RDO; devolve false quando a cota estoura. */
-    update(id, mutate, { deBanco = false } = {}) {
+    update(id, mutate) {
+      recarregarSeMudou();
       const i = db.rdos.findIndex((r) => r.id === id);
       if (i < 0) return false;
       const antes = JSON.stringify(db.rdos[i]);
       const carimbo = db.rdos[i].atualizado;
-      mutate(db.rdos[i]);
-      // quem mexeu de verdade carimba a hora; quem só trouxe uma versão do banco mantém a dele
-      if (db.rdos[i].atualizado === carimbo) db.rdos[i].atualizado = Date.now();
-      if (save()) {
-        // veio do banco não volta para o banco (evita laço de subir o que acabou de descer)
-        if (!deBanco) window.Conta?.agendar?.();
-        return true;
+      try {
+        mutate(db.rdos[i]);
+      } catch {
+        // a alteração quebrou no meio (item que sumiu, dado torto): nada fica pela metade
+        db.rdos[i] = JSON.parse(antes);
+        return false;
       }
+      enxugar(db.rdos[i]);
+      // quem mexeu de verdade carimba a hora; quem só trouxe uma versão do banco mantém a dele
+      // O carimbo nunca anda para trás: se a versão anterior veio de um aparelho com o relógio
+      // adiantado, "agora" seria menor que o carimbo dela e a edição daqui nunca subiria.
+      if (db.rdos[i].atualizado === carimbo) db.rdos[i].atualizado = Math.max(Date.now(), (Number(carimbo) || 0) + 1);
+      // save() já agenda o envio; o que veio do banco tem o carimbo do banco e não volta para lá
+      if (save()) return true;
       // cota estourou: desfaz também na memória. Antes a alteração ficava só na tela,
       // sumia ao reabrir e travava a gravação de tudo o que viesse depois.
       db.rdos[i] = JSON.parse(antes);

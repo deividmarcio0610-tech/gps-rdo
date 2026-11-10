@@ -18,8 +18,11 @@ window.Pdf = (() => {
     return a ? `${d}/${m}/${a}` : '—';
   };
 
-  /** Faixa laranja do topo com o título e a logo In-Haus (resumo do mês). */
-  function faixa(doc, titulo, margem) {
+  /**
+   * Faixa laranja do topo com o título e a logo In-Haus (resumo do mês e relatório de campo).
+   * A linha de baixo é o nome da empresa, ou o `subtitulo` quando ele vem.
+   */
+  function faixa(doc, titulo, margem, subtitulo) {
     const larg = doc.internal.pageSize.getWidth();
     doc.setFillColor(...ORANGE);
     doc.rect(0, 0, larg, 25, 'F');
@@ -28,7 +31,7 @@ window.Pdf = (() => {
     doc.setFontSize(15);
     doc.text(titulo, larg / 2, 15.5, { align: 'center' });
     doc.setFontSize(8.5);
-    doc.text(String(window.Store.config.companyName || '').toUpperCase(), larg / 2, 21, { align: 'center' });
+    doc.text(String(subtitulo ?? window.Store.config.companyName ?? '').toUpperCase(), larg / 2, 21, { align: 'center' });
     // logo In-Haus: a faixa é laranja e a logo também, então ela vai sobre um quadro branco
     if (window.Logo) {
       const caixaL = 30;
@@ -166,9 +169,13 @@ window.Pdf = (() => {
       linhas[linhas.length - 1] = `${ultima.trimEnd()}…`;
     }
     const asc = size * 0.3528;
+    // 'bottom' encosta a última linha no pé do quadro. Antes não existia e caía no meio: num
+    // quadro de várias linhas da folha, o texto ficava em cima da linha do meio, como riscado.
     const base = o.valign === 'top'
       ? y + pad * 0.5 + asc * 0.85
-      : y + h / 2 - ((linhas.length - 1) * lh) / 2 + asc * 0.33;
+      : o.valign === 'bottom'
+        ? y + h - pad * 0.6 - (linhas.length - 1) * lh
+        : y + h / 2 - ((linhas.length - 1) * lh) / 2 + asc * 0.33;
     const align = o.align || 'left';
     const tx = align === 'center' ? x + w / 2 : align === 'right' ? x + w - pad : x + pad;
     linhas.forEach((l, i) => {
@@ -339,7 +346,7 @@ window.Pdf = (() => {
     if (comBloqueio) {
       const b = rdo.bloqueio;
       c('B', 'B', 16, 16, '9', { font: 'times', size: 7, align: 'center' });
-      guarda(c('C', 'K', 16, 16, `BLOQUEIO:${b.motivo ? ` ${b.motivo}` : ''}`, { font: 'times', size: 7 }),
+      guarda(c('C', 'K', 16, 16, `ESPERA POR BLOQUEIO:${b.motivo ? ` ${b.motivo}` : ''}`, { font: 'times', size: 7 }),
         'Bloqueio', b.motivo);
       c('L', 'L', 16, 16, b.inicio || '', { font: 'times', size: 7, align: 'right' });
       c('M', 'M', 16, 16, b.fim || '', { font: 'times', size: 7, align: 'right' });
@@ -411,7 +418,7 @@ window.Pdf = (() => {
     guarda(c('E', 'G', linha(51), linha(51), tst ? `Téc. Segurança: ${tst}` : '', { bold: true, size: 6.3, min: 4.6 }), 'Técnico de Segurança', tst);
     c('H', 'M', linha(51), linha(51), 'Nome:', { bold: true, size: 6.3 });
     c('B', 'G', linha(52), linha(52), 'Ass:', { bold: true, size: 6.3 });
-    c('H', 'M', linha(52), linha(52), 'Ass:', { bold: true, size: 6.3 });
+    // a metade do cliente tem duas células (Ass: e Data:); antes o "Ass:" era desenhado duas vezes, uma por cima da outra
     c('H', 'J', linha(52), linha(52), 'Ass:', { bold: true, size: 6.3 });
     c('K', 'M', linha(52), linha(52), 'Data:', { bold: true, size: 6.3 });
     c('B', 'M', linha(53), linha(53), '', { fill: LARANJA });
@@ -437,6 +444,15 @@ window.Pdf = (() => {
   async function escrever(doc, rdo, { primeira = true } = {}) {
     // RDO antigo (ou vindo do banco): ganha as etapas e os campos do formulário
     rdo = comPadroesDoDia(Store.completo(rdo));
+    // Bloqueio lançado em Etapas do Dia (pedido de 10/11/2026): o fim da execução sai já com
+    // o desconto e a frase entra nas observações. A conta é feita só aqui, uma vez, em cima
+    // das horas guardadas no RDO (que ficam sem o desconto).
+    const contaBloqueio = Store.bloqueioDoRdo(rdo);
+    rdo.etapas = Store.etapasComDesconto(rdo);
+    if (contaBloqueio) rdo.notes = [String(rdo.notes || '').trim(), Store.fraseDoBloqueio(contaBloqueio)].filter(Boolean).join('\n');
+    // A linha 9 sai das mesmas horas da conta: bloqueio pela metade ou com hora inválida (dado
+    // torto vindo do banco) não desenha linha sem desconto nem hora diferente da frase.
+    rdo.bloqueio = contaBloqueio ? { inicio: contaBloqueio.inicio, fim: contaBloqueio.fim, motivo: contaBloqueio.motivo } : null;
     const fotos = rdo.photos || [];
     const larg = doc.internal.pageSize.getWidth();
     const alt = doc.internal.pageSize.getHeight();
@@ -516,9 +532,241 @@ window.Pdf = (() => {
     // cadastro não entram no PDF: o bloco antigo de quem preencheu saiu junto.
   }
 
+  // ---------------------------------------------------------------- relatório de campo
+  /*
+   * Relatório de Campo (pedido de 10/11/2026): o relatório padrão do app, o que existia antes
+   * da folha "RDO ADM" do cliente. Faixa laranja, identificação e uma tabela por seção, só
+   * com o que foi lançado: seção vazia não aparece, e não entram "Tiago" nem o técnico de segurança
+   * de segunda a sexta (são do RDO Final). As etapas saem com as horas da tela Etapas do Dia.
+   * O RDO Final (a folha do cliente) continua em `escrever`.
+   */
+  const VERMELHO = [198, 40, 40];
+  const VERDE = [46, 125, 50];
+  const AMBAR = [178, 106, 0];
+  const semValor = (v) => v == null || v === '';
+  // número com vírgula, como se escreve aqui (1200,5 e não 1200.5)
+  const numero = (v) => String(v).replace('.', ',');
+
+  async function escreverCampo(doc, rdoBruto) {
+    const rdo = Store.completo(rdoBruto);
+    const larg = doc.internal.pageSize.getWidth();
+    const alt = doc.internal.pageSize.getHeight();
+    const margem = 14;
+    const util = larg - margem * 2;
+    const topo = 16;        // onde o conteúdo recomeça numa página nova
+    const fim = alt - 14;   // o rodapé fica abaixo disto
+    const novaPagina = () => { doc.addPage(); return topo; };
+
+    faixa(doc, 'RELATÓRIO DIÁRIO DE OBRA', margem, 'Relatório de Campo');
+    let y = 33;
+
+    // identificação: número, data, turno e tipo na linha de cima; o resto só se foi preenchido
+    doc.setTextColor(30, 30, 30);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    const linhaTopo = [`RDO Nº ${rdo.number || '—'}`, rdo.date && fmtDate(rdo.date), rdo.shift && `Turno ${rdo.shift}`, rdo.maintenanceType]
+      .filter(Boolean).join('  ·  ');
+    const linhasTopo = doc.splitTextToSize(linhaTopo, util);
+    doc.text(linhasTopo, margem, y);
+    y += (linhasTopo.length - 1) * 4.8 + 3;
+    const autor = [rdo.autor?.nome || rdo.donoNome, rdo.autor?.funcao].filter(Boolean).join(' — ');
+    const finalizado = rdo.status === 'final';
+    const quandoFinalizou = (() => {
+      const d = new Date(rdo.finalizedAt || '');
+      if (!finalizado || Number.isNaN(d.getTime())) return '';
+      const dd = (v) => String(v).padStart(2, '0');
+      return ` em ${dd(d.getDate())}/${dd(d.getMonth() + 1)}/${d.getFullYear()} ${dd(d.getHours())}:${dd(d.getMinutes())}`;
+    })();
+    const dados = [
+      ['Local / Mina', rdo.location],
+      ['Cliente', rdo.cliente],
+      ['Complexo', rdo.complexo],
+      ['Gerência', rdo.gerencia],
+      ['Equipe / Coordenação', rdo.equipeCoord],
+      ['Clima', rdo.weather],
+      ['Horário', rdo.startTime || rdo.endTime ? `${rdo.startTime || '—'} às ${rdo.endTime || '—'}` : ''],
+      ['Supervisor', rdo.supervisor],
+      // (técnico de segurança não entra aqui: é posto pelo supervisor, só no RDO Final)
+      ['Lançado por', autor],
+      ['Situação', finalizado ? `Finalizado${quandoFinalizou}` : 'Em aberto'],
+    ].map(([k, v]) => [k, String(v || '').trim()]).filter(([, v]) => v);
+    doc.autoTable({
+      startY: y,
+      margin: { top: topo, bottom: 16, left: margem, right: margem },
+      body: dados,
+      theme: 'plain',
+      styles: { font: 'helvetica', fontSize: 9, cellPadding: { top: 0.6, bottom: 0.6, left: 0, right: 2 }, textColor: [50, 50, 50], overflow: 'linebreak' },
+      columnStyles: { 0: { cellWidth: 40, fontStyle: 'bold', textColor: [110, 110, 110] } },
+    });
+    y = doc.lastAutoTable.finalY + 2.5;
+    doc.setDrawColor(...ORANGE);
+    doc.setLineWidth(0.7);
+    doc.line(margem, y, larg - margem, y);
+    y += 7;
+
+    // seção numerada em tabela; some inteira quando não há linha
+    let n = 0;
+    const titulo = (texto, cor = ORANGE) => {
+      n += 1;
+      if (y + 20 > fim) y = novaPagina();
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9.5);
+      doc.setTextColor(...cor);
+      doc.text(`${n}. ${texto}`, margem, y);
+      y += 2.5;
+    };
+    const secao = (texto, colunas, corpo, o = {}) => {
+      if (!corpo.length) return;
+      const cor = o.cor || ORANGE;
+      titulo(texto, cor);
+      doc.autoTable({
+        startY: y,
+        margin: { top: topo, bottom: 16, left: margem, right: margem },
+        head: colunas ? [colunas] : undefined,
+        body: corpo,
+        foot: o.pe ? [o.pe] : undefined,
+        theme: 'grid',
+        rowPageBreak: 'auto',
+        styles: { font: 'helvetica', fontSize: 8.5, cellPadding: 2, textColor: [40, 40, 40], lineColor: [220, 220, 220], lineWidth: 0.15, overflow: 'linebreak' },
+        headStyles: { fillColor: cor, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8.5 },
+        footStyles: { fillColor: GRAY, textColor: [40, 40, 40], fontStyle: 'bold' },
+        alternateRowStyles: { fillColor: GRAY },
+        columnStyles: o.larguras || {},
+        didParseCell: (d) => {
+          if (d.section !== 'body' || !o.colorir) return;
+          const tinta = o.colorir(d.column.index, String(d.cell.text?.[0] ?? ''));
+          if (tinta) { d.cell.styles.textColor = tinta; d.cell.styles.fontStyle = 'bold'; }
+        },
+      });
+      y = doc.lastAutoTable.finalY + 7;
+    };
+
+    // Etapas: as mesmas horas da tela Etapas do Dia e do RDO Final (o que foi salvo ou, onde
+    // nada foi mudado, o horário fixo do modelo), com o fim da execução já descontado quando há
+    // bloqueio, e o bloqueio fechando a lista. Antes só entrava etapa salva: quem via as horas
+    // na tela e não tocava em Salvar mandava o relatório sem a seção.
+    const contaBloqueio = Store.bloqueioDoRdo(rdo);
+    const linhasEtapas = Store.etapasComDesconto(rdo)
+      .map((horas, i) => [Store.ETAPAS[i].replace(/:\s*$/, ''), horas.inicio || '—', horas.fim || '—']);
+    if (contaBloqueio) {
+      linhasEtapas.push([
+        `ESPERA POR BLOQUEIO (${Store.fmtHoras(contaBloqueio.minutos)})${contaBloqueio.motivo ? `: ${contaBloqueio.motivo}` : ''}`,
+        contaBloqueio.inicio, contaBloqueio.fim,
+      ]);
+    }
+    secao('ETAPAS DO DIA', ['Etapa', 'Início', 'Fim'], linhasEtapas,
+      { larguras: { 1: { cellWidth: 20, halign: 'center' }, 2: { cellWidth: 20, halign: 'center' } } });
+
+    secao('MÃO DE OBRA', ['Nome', 'Função', 'Equipe', 'Presença', 'Horas'],
+      rdo.workforce.map((w) => [w.name || '—', w.role || '—', w.team || '—', w.status || '—', semValor(w.hours) ? '—' : `${numero(Number(w.hours) || 0)}h`]),
+      {
+        larguras: { 0: { cellWidth: 58 }, 3: { cellWidth: 24 }, 4: { cellWidth: 18, halign: 'right' } },
+        colorir: (coluna, texto) => (coluna === 3 && texto === 'Falta' ? VERMELHO : null),
+      });
+
+    secao('EQUIPAMENTOS', ['Equipamento', 'Status', 'Horímetro'],
+      rdo.equipmentList.map((e) => [
+        e.name || '—', e.status || '—',
+        semValor(e.hoursStart) && semValor(e.hoursEnd) ? '—'
+          : `${semValor(e.hoursStart) ? '?' : `${numero(e.hoursStart)}h`} a ${semValor(e.hoursEnd) ? '?' : `${numero(e.hoursEnd)}h`}`,
+      ]),
+      { larguras: { 1: { cellWidth: 32 }, 2: { cellWidth: 44, halign: 'right' } } });
+
+    secao('ATIVIDADES REALIZADAS', ['OS', 'Tipo', 'Descrição', 'Execução', 'Status'],
+      rdo.tasks.map((t) => {
+        const p = Number(t.progress) || 0;
+        const complemento = [t.tag && `TAG ${t.tag}`, t.area && `Área: ${t.area}`, t.backlogDe && 'veio do backlog'].filter(Boolean).join(' · ');
+        return [
+          t.os || '—', t.maintenanceType || '—',
+          [t.description, complemento, t.notes].filter(Boolean).join('\n'),
+          semValor(t.progress) ? '—' : `${p}%`,
+          t.status || (p >= 100 ? 'Concluído' : 'Em Andamento'),
+        ];
+      }),
+      {
+        larguras: { 0: { cellWidth: 24 }, 1: { cellWidth: 22 }, 3: { cellWidth: 20, halign: 'right' }, 4: { cellWidth: 28 } },
+        colorir: (coluna, texto) => (coluna !== 4 ? null : (texto === 'Concluído' ? VERDE : AMBAR)),
+      });
+
+    secao('OCORRÊNCIAS', ['Tipo', 'Descrição', 'Hora', 'Local'],
+      rdo.occurrences.map((o) => [o.type || '—', o.description || '', o.time || '—', o.location || '—']),
+      { cor: VERMELHO, larguras: { 0: { cellWidth: 28 }, 2: { cellWidth: 16, halign: 'center' }, 3: { cellWidth: 40 } } });
+
+    // horas paradas saíram das telas, mas RDO antigo que tem parada continua mostrando
+    const paradas = rdo.stoppages;
+    secao('HORAS PARADAS', ['Motivo', 'Parou', 'Voltou', 'Tempo', 'Observação'],
+      paradas.map((p) => [p.reason || '—', p.start || '—', p.end || '—', Store.fmtHoras(Store.minutosParada(p)), p.note || '']),
+      {
+        larguras: { 1: { cellWidth: 17, halign: 'center' }, 2: { cellWidth: 17, halign: 'center' }, 3: { cellWidth: 17, halign: 'right' } },
+        pe: ['Total parado', '', '', Store.fmtHoras(paradas.reduce((s, p) => s + Store.minutosParada(p), 0)), ''],
+      });
+
+    const notas = String(rdo.notes || '').trim();
+    secao('OBSERVAÇÕES GERAIS', null, notas ? [[notas]] : []);
+
+    // registro fotográfico: duas fotos por linha, cada uma com a legenda dela embaixo
+    const fotos = rdo.photos;
+    if (fotos.length) {
+      const imagens = await Promise.all(fotos.map((p) => (window.Fotos ? window.Fotos.imagem(p) : (p.data || null))));
+      const espaco = 6;
+      const colL = (util - espaco) / 2;
+      const fotoA = 62;
+      const altLinha = 3.2;
+      const MAX_LINHAS = 5;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      const legendas = fotos.map((p, i) => {
+        const gps = p.latitude != null && p.longitude != null
+          ? `GPS ${Number(p.latitude).toFixed(6)}, ${Number(p.longitude).toFixed(6)}` : '';
+        const cabeca = [`Foto ${i + 1}`, [p.date && fmtDate(p.date), p.time].filter(Boolean).join(' '), gps].filter(Boolean).join(' · ');
+        const linhas = doc.splitTextToSize([cabeca, String(p.desc || '').trim()].filter(Boolean).join(' — '), colL);
+        if (linhas.length <= MAX_LINHAS) return linhas;
+        const corte = linhas.slice(0, MAX_LINHAS);
+        corte[MAX_LINHAS - 1] = `${corte[MAX_LINHAS - 1].replace(/.{0,3}$/, '')}…`;
+        return corte;
+      });
+      // o título não fica sozinho no pé da página: vai junto com a primeira linha de fotos
+      if (y + 6 + fotoA + legendas[0].length * altLinha + 4 > fim) y = novaPagina();
+      titulo('REGISTRO FOTOGRÁFICO');
+      y += 1;
+      for (let i = 0; i < fotos.length; i += 2) {
+        const par = [i, i + 1].filter((k) => k < fotos.length);
+        const altLegenda = Math.max(...par.map((k) => legendas[k].length)) * altLinha + 3;
+        if (y + fotoA + altLegenda > fim) y = novaPagina();
+        par.forEach((k, coluna) => {
+          const x = margem + coluna * (colL + espaco);
+          doc.setFillColor(...GRAY);
+          doc.setDrawColor(200, 200, 200);
+          doc.setLineWidth(FINA);
+          doc.rect(x, y, colL, fotoA, 'FD');
+          if (!imagemNoQuadro(doc, imagens[k], x, y, colL, fotoA)) {
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(8);
+            doc.setTextColor(120, 120, 120);
+            doc.text('Foto indisponível neste aparelho', x + colL / 2, y + fotoA / 2, { align: 'center' });
+          }
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(7.5);
+          doc.setTextColor(60, 60, 60);
+          doc.text(legendas[k], x, y + fotoA + 3.4);
+        });
+        y += fotoA + altLegenda + 2;
+      }
+    }
+
+    rodape(doc, [`RDO ${rdo.number || ''}`.trim(), rdo.date && fmtDate(rdo.date), 'Relatório de Campo']);
+  }
+
+  /** `formato: 'campo'` pede o Relatório de Campo; sem isso sai o RDO Final (folha do cliente). */
+  const ehCampo = (opcoes) => opcoes?.formato === 'campo';
+
   /** Monta o PDF de um RDO (com as fotos) e devolve o documento e o nome do arquivo. */
-  async function montar(rdo) {
+  async function montar(rdo, opcoes) {
     const doc = novoDoc();
+    if (ehCampo(opcoes)) {
+      await escreverCampo(doc, rdo);
+      return { doc, nome: `Relatorio_de_Campo_${rdo.number}.pdf` };
+    }
     await escrever(doc, rdo);
     rodapeFormulario(doc, [{ de: 1, ate: doc.getNumberOfPages(), rdo }]);
     return { doc, nome: `RDO_${rdo.number}.pdf` };
@@ -634,8 +882,8 @@ window.Pdf = (() => {
    * No APK, se houver FileOpener, entrega ao visualizador do Android; senão usa o
    * compartilhar (o WebView não desenha PDF sozinho).
    */
-  async function abrir(rdo, janelaAberta) {
-    const { doc, nome } = await montar(rdo);
+  async function abrir(rdo, janelaAberta, opcoes) {
+    const { doc, nome } = await montar(rdo, opcoes);
     const plugins = nativo();
     if (plugins?.Filesystem) {
       const base64 = doc.output('datauristring').split(',')[1];
@@ -677,8 +925,8 @@ window.Pdf = (() => {
   }
 
   /** Baixar PDF: no navegador salva o arquivo; no APK abre o compartilhar (salvar ou enviar). */
-  async function gerar(rdo) {
-    const { doc, nome } = await montar(rdo);
+  async function gerar(rdo, opcoes) {
+    const { doc, nome } = await montar(rdo, opcoes);
     if (nativo()?.Filesystem && nativo()?.Share) return compartilharNativo(doc, nome, 'Salvar ou enviar o PDF');
     doc.save(nome);
     return 'baixado';
@@ -689,8 +937,8 @@ window.Pdf = (() => {
    * `enviar` precisa ser chamado direto no toque do botão: o Safari só abre o
    * compartilhar dentro do toque, por isso o PDF é montado antes.
    */
-  async function preparar(rdo) {
-    const { doc, nome } = await montar(rdo);
+  async function preparar(rdo, opcoes) {
+    const { doc, nome } = await montar(rdo, opcoes);
     return {
       nome,
       enviar(texto) {
@@ -713,5 +961,5 @@ window.Pdf = (() => {
     };
   }
 
-  return { abrir, gerar, preparar, gerarVarios, montarVarios, resumoMes, nomeMes };
+  return { abrir, gerar, preparar, montar, gerarVarios, montarVarios, resumoMes, nomeMes };
 })();

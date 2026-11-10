@@ -365,6 +365,11 @@ select {
 /* etapas do dia: um quadro por etapa do formulário do cliente */
 .etapa { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 11px; margin-bottom: 9px; background: var(--surface); }
 .etapa-nome { font-size: 12.5px; font-weight: 700; line-height: 1.35; margin-bottom: 7px; }
+/* bloqueio do dia (linha 9) e o aviso da conta do desconto, na etapa da execução */
+.etapa.etapa-bloqueio { border-left: 4px solid var(--amber); }
+.etapa .dica { margin-top: 8px; }
+.etapa .dica.desconto { color: var(--green); font-weight: 700; font-size: 12.5px; }
+.etapa .dica.desconto.erro { color: var(--red); }
 
 /* ---------------------------------------------------------------- botões */
 
@@ -930,3 +935,50 @@ footer.brand .rdo { color: var(--blue); }
 .aviso.erro { background: rgba(229, 57, 53, 0.12); color: var(--red); }
 .aviso.ok { background: rgba(46, 125, 50, 0.12); color: #2e7d32; }
 body.dark .aviso.ok { color: #81c784; }
+
+/* ---------------------------------------------------------------- sair e abas do relatório (10/11/2026) */
+
+/* some sem guardar o lugar (o voltar e o SAIR do topo dividem o mesmo canto) */
+.fora { display: none !important; }
+
+.topbar .sair-link { margin-right: 0; margin-left: 4px; min-width: 44px; min-height: 36px; }
+
+.action-card.wide.sair-card svg { stroke: var(--red); }
+.action-card.wide.sair-card { color: var(--red); }
+
+/* Gerar Relatório: abas "RDO Final" e "Relatório de Campo" do RDO escolhido */
+#rel-topo { scroll-margin-top: calc(66px + env(safe-area-inset-top, 0px)); }
+
+.abas.abas-relatorio { margin-bottom: 0; gap: 0; }
+
+.abas-relatorio .aba {
+  padding: 12px 6px;
+  font-size: 13px;
+  font-weight: 700;
+  border-radius: 0;
+  border-bottom-width: 3px;
+}
+.abas-relatorio .aba:first-child { border-radius: 10px 0 0 0; }
+.abas-relatorio .aba:last-child { border-radius: 0 10px 0 0; border-left-width: 0; }
+
+.abas-relatorio .aba.ativa {
+  background: var(--surface);
+  border-bottom-color: var(--orange);
+}
+
+.painel-relatorio {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-top: 0;
+  border-radius: 0 0 10px 10px;
+  padding: 12px;
+  margin-top: -12px; /* encosta nas abas: o main separa os blocos com 12px */
+}
+
+/* folha com várias saídas (ex.: tirar só deste aparelho / apagar do banco) */
+.sheet .sheet-opcoes { display: flex; flex-direction: column; gap: 8px; margin-top: 2px; }
+
+body.campo .abas-relatorio .aba { font-size: 15px; padding: 14px 6px; }

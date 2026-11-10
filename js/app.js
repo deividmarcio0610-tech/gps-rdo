@@ -7,6 +7,7 @@
     tela: document.getElementById('screen'),
     titulo: document.getElementById('screen-title'),
     voltar: document.getElementById('btn-back'),
+    sairTopo: document.getElementById('btn-sair-top'),
     relatorioTopo: document.getElementById('btn-report-top'),
     tema: document.getElementById('theme-slot'),
     instalar: document.getElementById('install-slot'),
@@ -18,10 +19,12 @@
     // Em Gerar Relatório, só o RDO escolhido pelo toque abre. Sem isso a tela monta
     // já no relatório inteiro ao abrir a página, em vez de mostrar só a lista.
     escolhido: false,
+    // o próximo desenho leva a tela até as abas do RDO recém-aberto, em vez de voltar ao topo
+    rolarAoRelatorio: false,
   };
 
   // telas que funcionam sem um RDO aberto (a de apagar não pode recriar o que acabou de sumir)
-  const SEM_RDO = new Set(['home', 'reports', 'backup', 'month', 'roster', 'conta', 'equipe', 'controle']);
+  const SEM_RDO = new Set(['home', 'reports', 'backup', 'month', 'roster', 'conta', 'equipe', 'controle', 'sair']);
 
   // APK sempre da última versão publicada no GitHub (fora do service worker do site)
   const APK_URL = 'https://github.com/deividmarcio0610-tech/gps-rdo/releases/latest/download/GPS-RDO.apk';
@@ -41,6 +44,8 @@
     if (vazioDoDia) { estado.rdoId = vazioDoDia.id; return vazioDoDia; }
     if (!criarSeFaltar) return null;
     const novo = Store.createRdo();
+    // aparelho sem espaço: o RDO não foi criado; quem chamou avisa e não troca de tela
+    if (!novo) return null;
     estado.rdoId = novo.id;
     return novo;
   }
@@ -58,6 +63,16 @@
 
   const app = {
     go(tela, { replace = false } = {}) {
+      // a tela precisa de um RDO e não deu para criar (aparelho cheio): fica onde está
+      if (!SEM_RDO.has(tela) && !rdoAtual(true)) {
+        UI.toast('Não foi possível criar o RDO: o aparelho está sem espaço. Apague relatórios antigos.');
+        return;
+      }
+      // só a escolha explícita (botão RELATÓRIO do início) abre o relatório inteiro;
+      // qualquer outra entrada em Gerar Relatório mostra a lista.
+      // Vem antes de marcar(): a entrada do histórico guarda a escolha desta tela. Antes ela
+      // guardava a da tela anterior, e voltar de uma edição caía na lista, não no relatório.
+      estado.escolhido = tela === 'report';
       // substituir só a tela de cima; no início não há o que substituir e a tela entra por cima
       if (replace && estado.pilha.length) {
         estado.pilha[estado.pilha.length - 1] = tela;
@@ -66,10 +81,7 @@
         estado.pilha.push(tela);
         marcar(false);
       }
-      // só a escolha explícita (botão RELATÓRIO do início) abre o relatório inteiro;
-      // qualquer outra entrada em Gerar Relatório mostra a lista
-      estado.escolhido = tela === 'report';
-      if (!SEM_RDO.has(tela)) rdoAtual(true);
+      Screens.aoEntrar?.(tela);
       render();
     },
 
@@ -78,6 +90,7 @@
     abrir(id) {
       estado.rdoId = id;
       estado.escolhido = true;
+      estado.rolarAoRelatorio = true;
       estado.pilha = ['report'];
       marcar(false);
       render();
@@ -94,15 +107,38 @@
 
     render() { render(); },
 
+    /**
+     * Redesenha a tela só se não for atrapalhar: sem folha aberta e sem campo em uso. Serve
+     * para o que chega sozinho (RDO que desceu do banco, gravação feita em outra aba): a
+     * lista fica em dia, mas quem está digitando não perde o que digitou.
+     */
+    renderSeguro() {
+      if (ocupadoDigitando()) { estado.redesenhoPendente = true; return false; }
+      estado.redesenhoPendente = false;
+      render();
+      return true;
+    },
+
     /** Volta ao início (depois de entrar, criar conta ou sair). */
     irParaInicio() {
       estado.pilha = [];
       estado.escolhido = false;
+      // o RDO aberto é o mais recente da conta que está agora no aparelho (ou nenhum)
+      estado.rdoId = Store.rdos[0]?.id || null;
       marcar(true);
       window.scrollTo({ top: 0 });
       render();
     },
   };
+
+  /** Há folha aberta, campo com o cursor ou formulário na tela? Então não é hora de redesenhar. */
+  function ocupadoDigitando() {
+    if (UI.haFolhaAberta?.() || document.querySelector('.scrim')) return true;
+    const foco = document.activeElement;
+    if (foco && /^(INPUT|TEXTAREA|SELECT)$/.test(foco.tagName) && el.app.contains(foco)) return true;
+    // formulários que só gravam no botão Salvar (cabeçalho, etapas, cadastro): redesenhar apagaria o digitado
+    return Boolean(el.tela.querySelector('fieldset.campos:not([disabled]), form[data-form]'));
+  }
 
   window.addEventListener('popstate', (evento) => {
     // com uma folha aberta, o voltar só fecha a folha e a tela fica onde estava
@@ -110,6 +146,8 @@
     const pilha = evento.state?.pilha;
     estado.pilha = Array.isArray(pilha) ? [...pilha] : [];
     estado.escolhido = evento.state?.escolhido === true;
+    // voltou para uma lista do banco (depois de corrigir um RDO, por exemplo): ela é relida
+    Screens.aoEntrar?.(telaAtual());
     render();
   });
 
@@ -160,6 +198,8 @@
     el.tela.innerHTML = definicao.html;
     el.tela.scrollTop = 0;
     el.voltar.classList.add('hidden');
+    el.voltar.classList.remove('fora');
+    el.sairTopo?.classList.add('fora');
     el.relatorioTopo.classList.add('hidden');
     el.instalar.innerHTML = '';
     el.tema.innerHTML = '';
@@ -181,8 +221,10 @@
     el.tela.innerHTML = definicao.html;
     el.tela.scrollTop = 0;
 
-    // topo: voltar só fora do início; RELATÓRIO só no início
-    el.voltar.classList.toggle('hidden', tela === 'home');
+    // topo: voltar só fora do início; no início, o lugar dele é do SAIR. RELATÓRIO só no início
+    el.voltar.classList.remove('hidden');
+    el.voltar.classList.toggle('fora', tela === 'home');
+    el.sairTopo?.classList.toggle('fora', tela !== 'home');
     el.relatorioTopo.classList.toggle('hidden', tela !== 'home');
 
     definicao.bind?.(el.tela);
@@ -208,7 +250,11 @@
     });
 
     desenharInstalacao();
-    window.scrollTo({ top: 0 });
+    // RDO recém-aberto: a tela desce até as abas dele (a lista de RDOs fica acima); senão, topo
+    const alvo = estado.rolarAoRelatorio && tela === 'report' ? document.getElementById('rel-topo') : null;
+    estado.rolarAoRelatorio = false;
+    if (alvo) alvo.scrollIntoView({ block: 'start' });
+    else window.scrollTo({ top: 0 });
   }
 
   /**
@@ -252,6 +298,22 @@
 
   el.voltar.addEventListener('click', () => app.voltar());
   el.relatorioTopo.addEventListener('click', () => app.go('report'));
+  // pedido de 10/11/2026: SAIR no topo do início leva à página de sair (que volta para o login)
+  el.sairTopo?.addEventListener('click', () => app.go('sair'));
+
+  /*
+   * Outra aba gravou (Gerar Relatório e Controle abrem em aba própria): esta aba relê os
+   * dados do aparelho na hora, para não gravar a cópia velha por cima depois, e atualiza a
+   * tela quando isso não atrapalha.
+   */
+  window.addEventListener('storage', (evento) => {
+    if (evento.key && !evento.key.startsWith('rdo_digital_db_v1')) return;
+    if (Store.recarregarSeMudou()) app.renderSeguro();
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (Store.recarregarSeMudou() || estado.redesenhoPendente) app.renderSeguro();
+  });
 
   Screens.boot(app);
 
@@ -265,10 +327,12 @@
   // quando o convite chega (Android) ou o app é instalado, redesenha a faixa
   Pwa.aoMudar(() => desenharInstalacao());
 
-  // garante um RDO aberto na primeira carga
+  // O RDO aberto na primeira carga é o mais recente. Sem nenhum, não se cria um aqui: antes
+  // só abrir o app (até na tela de login) já criava um RDO em branco, que subia para o banco
+  // e contava no Controle de RDO como se a pessoa tivesse feito o RDO do dia. O RDO nasce
+  // quando ela entra numa seção ou toca em "Novo RDO".
   const ultimo = Store.rdos[0];
   if (ultimo) estado.rdoId = ultimo.id;
-  else rdoAtual(true);
 
   // primeira entrada do histórico = início; voltar a partir dela sai do app
   marcar(true);
