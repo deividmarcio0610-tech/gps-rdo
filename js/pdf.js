@@ -18,11 +18,8 @@ window.Pdf = (() => {
     return a ? `${d}/${m}/${a}` : '—';
   };
 
-  /**
-   * Faixa laranja do topo com o título e a logo In-Haus (resumo do mês e relatório de campo).
-   * A linha de baixo é o nome da empresa, ou o `subtitulo` quando ele vem.
-   */
-  function faixa(doc, titulo, margem, subtitulo) {
+  /** Faixa laranja do topo com o título e a logo In-Haus (resumo do mês). */
+  function faixa(doc, titulo, margem) {
     const larg = doc.internal.pageSize.getWidth();
     doc.setFillColor(...ORANGE);
     doc.rect(0, 0, larg, 25, 'F');
@@ -31,7 +28,7 @@ window.Pdf = (() => {
     doc.setFontSize(15);
     doc.text(titulo, larg / 2, 15.5, { align: 'center' });
     doc.setFontSize(8.5);
-    doc.text(String(subtitulo ?? window.Store.config.companyName ?? '').toUpperCase(), larg / 2, 21, { align: 'center' });
+    doc.text(String(window.Store.config.companyName || '').toUpperCase(), larg / 2, 21, { align: 'center' });
     // logo In-Haus: a faixa é laranja e a logo também, então ela vai sobre um quadro branco
     if (window.Logo) {
       const caixaL = 30;
@@ -95,10 +92,17 @@ window.Pdf = (() => {
   const OM_POR_FOLHA = 4;
   const PESSOAS_POR_FOLHA = 7;
   const LINHAS_NOTA_OM = 4;
+  const LINHAS_OM = OM_POR_FOLHA * 6;
+  // Altura de cada linha de horário (as 8 etapas e a espera por bloqueio). No modelo do cliente
+  // são 4,19 mm; pedido de 10/11/2026: mais baixas, porque tomavam muito espaço. O que sobra
+  // vai para os blocos de OM (ver `geometria`).
+  const ALT_HORARIO = 3.5;
+  const ALT_HORARIO_MODELO = 4.19;
 
   /**
    * Rodapé de controle em todas as páginas, abaixo da folha: de qual RDO é a página e
    * "página n de N". O texto da empresa e o CNPJ ficam na própria folha (linha 54).
+   * `marca` (opcional, por RDO) entra no meio: é como o Relatório de Campo se identifica.
    */
   function rodapeFormulario(doc, paginas) {
     const larg = doc.internal.pageSize.getWidth();
@@ -107,7 +111,7 @@ window.Pdf = (() => {
     for (let p = 1; p <= total; p += 1) {
       doc.setPage(p);
       const info = paginas.find((x) => p >= x.de && p <= x.ate);
-      const linha = [info?.rdo?.number && `RDO ${info.rdo.number}`, info?.rdo?.date && fmtDate(info.rdo.date), total > 1 && `página ${p} de ${total}`]
+      const linha = [info?.rdo?.number && `RDO ${info.rdo.number}`, info?.rdo?.date && fmtDate(info.rdo.date), info?.marca, total > 1 && `página ${p} de ${total}`]
         .filter(Boolean).join(' · ');
       if (!linha) continue;
       doc.setFont('helvetica', 'normal');
@@ -268,18 +272,21 @@ window.Pdf = (() => {
   }
 
   /**
-   * Geometria da folha. O RDO final (com bloqueio) ganha uma linha 9 na tabela de
-   * execução: as 8 linhas de etapa encolhem um pouco e tudo o que vem abaixo fica
-   * exatamente na mesma altura. Sem bloqueio, é a folha antiga, de 54 linhas.
+   * Geometria da folha. As linhas de horário (8 etapas e, havendo bloqueio, a linha 9) têm
+   * todas `ALT_HORARIO`. O espaço que elas deixaram de ocupar em relação ao modelo é repartido
+   * entre as 24 linhas dos quatro blocos de OM: assim o que vem abaixo dos blocos (observações,
+   * equipe, supervisor e rodapé) fica exatamente na altura do modelo, com ou sem bloqueio.
+   * `linha(n)` converte o número da linha do modelo (1 a 54) na linha desta folha.
    */
   function geometria(comBloqueio) {
-    if (!comBloqueio) return { alturas: ALTURAS, ys: YS, linha: (n) => n };
-    const corte = 4.19 / 8;
+    const horarios = 8 + (comBloqueio ? 1 : 0);
+    const sobra = 8 * ALT_HORARIO_MODELO - horarios * ALT_HORARIO;
     const alturas = ALTURAS.slice();
-    for (let i = 7; i < 15; i += 1) alturas[i] -= corte;
-    alturas.splice(15, 0, 4.19);
+    for (let i = 7; i < 15; i += 1) alturas[i] = ALT_HORARIO;
+    for (let i = 16; i < 16 + LINHAS_OM; i += 1) alturas[i] += sobra / LINHAS_OM;
+    if (comBloqueio) alturas.splice(15, 0, ALT_HORARIO);
     const ys = alturas.reduce((a, h) => { a.push(a[a.length - 1] + h); return a; }, [TOPO]);
-    return { alturas, ys, linha: (n) => (n >= 16 ? n + 1 : n) };
+    return { alturas, ys, linha: (n) => (comBloqueio && n >= 16 ? n + 1 : n) };
   }
 
   /** Uma folha do RDO ADM na página atual. `k` é a folha (0 = primeira). */
@@ -353,26 +360,29 @@ window.Pdf = (() => {
     }
     c('B', 'M', linha(16), linha(16), 'OBSERVAÇÕES/DESVIOS/MOTIVO DA NÃO EXECUÇÃO DA ATIVIDADE:', { ...rotulo, size: 7.6 });
 
-    // 17-40: quatro blocos de OM
+    // 17-40: quatro blocos de OM. Sem pauta por dentro (pedido de 10/11/2026): o bloco é um
+    // quadro em branco, fechado só pelas divisões grossas da folha. O título fica no alto, a
+    // descrição corre logo abaixo dele e o status vai no pé. Antes cada bloco tinha seis linhas
+    // riscadas e o texto da descrição passava por cima delas.
     const tasks = rdo.tasks || [];
     for (let b = 0; b < OM_POR_FOLHA; b += 1) {
       const idx = k * OM_POR_FOLHA + b;
       const t = tasks[idx];
       const r0 = linha(17) + b * 6;
-      for (let r = r0; r < r0 + 6; r += 1) c('B', 'M', r, r, '', {});
       // linha do bloco: OS, TAG do equipamento e área; com OM, as atividades começam na
-      // parte de baixo da linha (pedido de 09/11/2026)
+      // linha de baixo (pedido de 09/11/2026)
       const comOm = Boolean(t && (String(t.os || '').trim() || String(t.tag || '').trim()));
       // "Nº da OS" digitado como "OS-4472" não vira "OS OS-4472"
       const numeroOs = String(t?.os || '').trim().replace(/^(os|om)\s*[-–:]?\s*/i, '');
       const titulo = t ? [numeroOs && `OS ${numeroOs}`, t.tag && `TAG ${t.tag}`, t.area, comOm ? '' : t.description].filter(Boolean).join(' - ') : '';
+      // só duas linhas no bloco (pedido de 11/11/2026): a do título da OM e a do status
       guarda(c('B', 'M', r0, r0, PREFIXO_OM + titulo, { bold: true, size: 7.6 }), `OM ${idx + 1} — título`, titulo);
       const atividades = t ? [comOm ? t.description : '', t.notes].filter(Boolean).join(' — ') : '';
       if (atividades) {
-        guarda(c('B', 'M', r0 + 1, r0 + LINHAS_NOTA_OM, atividades, { bold: true, size: 7.6, valign: 'bottom', borda: false }),
+        guarda(c('B', 'M', r0 + 1, r0 + LINHAS_NOTA_OM, atividades, { bold: true, size: 7.6, valign: 'top', borda: false }),
           `OM ${idx + 1} — atividades`, atividades);
       }
-      c('B', 'M', r0 + 5, r0 + 5, statusOm(t), { size: 7.6, underline: Boolean(t), borda: false });
+      c('B', 'M', r0 + 5, r0 + 5, statusOm(t), { size: 7.6, underline: Boolean(t) });
     }
 
     // 41: observações (só na primeira folha; as outras dizem de onde continuam)
@@ -436,14 +446,81 @@ window.Pdf = (() => {
   }
 
   /**
+   * Fotos do campo, em anexo depois da folha (pedido de 10/11/2026): duas por linha, cada
+   * uma com a legenda dela embaixo (número, data, hora, GPS e descrição), como o Relatório de
+   * Campo já mandava. Começa em `y` e devolve onde parou.
+   */
+  async function fotosDoCampo(doc, fotos, y) {
+    const larg = doc.internal.pageSize.getWidth();
+    const margem = 10;
+    const fim = doc.internal.pageSize.getHeight() - 10;
+    const rotulo = { fill: LARANJA, color: BRANCO, bold: true, size: 8.5, align: 'center' };
+    const imagens = await Promise.all(fotos.map((p) => (window.Fotos ? window.Fotos.imagem(p) : (p.data || null))));
+    const espaco = 6;
+    const colL = (larg - margem * 2 - espaco) / 2;
+    const fotoA = 64;
+    const altLinha = 3.2;
+    const MAX_LINHAS = 5;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    const legendas = fotos.map((p, i) => {
+      const gps = p.latitude != null && p.longitude != null
+        ? `GPS ${Number(p.latitude).toFixed(6)}, ${Number(p.longitude).toFixed(6)}` : '';
+      const cabeca = [`Foto ${i + 1}`, [p.date && fmtDate(p.date), p.time].filter(Boolean).join(' '), gps].filter(Boolean).join(' · ');
+      const linhas = doc.splitTextToSize([cabeca, String(p.desc || '').trim()].filter(Boolean).join(' — '), colL);
+      if (linhas.length <= MAX_LINHAS) return linhas;
+      const corte = linhas.slice(0, MAX_LINHAS);
+      corte[MAX_LINHAS - 1] = `${corte[MAX_LINHAS - 1].replace(/.{0,3}$/, '')}…`;
+      return corte;
+    });
+    const novaPagina = () => { doc.addPage(); y = 12; };
+    // o título não fica sozinho no pé da página: vai junto com a primeira linha de fotos
+    if (y + 6.4 + 2 + fotoA + legendas[0].length * altLinha + 3 > fim) novaPagina();
+    celula(doc, margem, y, larg - margem * 2, 6.4, 'REGISTRO FOTOGRÁFICO (ANEXO DO CAMPO)', rotulo);
+    y += 6.4 + 2;
+    for (let i = 0; i < fotos.length; i += 2) {
+      const par = [i, i + 1].filter((n) => n < fotos.length);
+      const altLegenda = Math.max(...par.map((n) => legendas[n].length)) * altLinha + 3;
+      if (y + fotoA + altLegenda > fim) novaPagina();
+      par.forEach((n, coluna) => {
+        const x = margem + coluna * (colL + espaco);
+        doc.setFillColor(...CINZA);
+        doc.setDrawColor(0, 0, 0);
+        doc.setLineWidth(FINA);
+        doc.rect(x, y, colL, fotoA, 'FD');
+        if (!imagemNoQuadro(doc, imagens[n], x, y, colL, fotoA)) {
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(8);
+          doc.setTextColor(120, 120, 120);
+          doc.text('Foto indisponível neste aparelho', x + colL / 2, y + fotoA / 2, { align: 'center' });
+        }
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor(60, 60, 60);
+        doc.text(legendas[n], x, y + fotoA + 3.4);
+      });
+      y += fotoA + altLegenda + 2;
+    }
+    return y;
+  }
+
+  /**
    * Desenha um RDO inteiro no formulário RDO ADM, a partir da página atual (ou de uma
    * página nova): uma folha a cada 4 OMs / 7 pessoas, depois a continuação com os textos
-   * que não couberam, o registro fotográfico e a foto de quem preencheu.
+   * que não couberam e, no Relatório de Campo, as fotos.
    * O PDF de um período chama esta função para cada RDO.
+   *
+   * `campo: true` é o Relatório de Campo (pedido de 10/11/2026: todos os relatórios na mesma
+   * folha). A folha é a mesma do RDO Final; muda só que nada é posto pelo supervisor (sem
+   * "Tiago" e sem o técnico de segurança de segunda a sexta) e que as fotos vão em anexo,
+   * cada uma com a legenda embaixo.
    */
-  async function escrever(doc, rdo, { primeira = true } = {}) {
+  async function escrever(doc, rdo, { primeira = true, campo = false } = {}) {
     // RDO antigo (ou vindo do banco): ganha as etapas e os campos do formulário
-    rdo = comPadroesDoDia(Store.completo(rdo));
+    rdo = campo ? Store.completo(rdo) : comPadroesDoDia(Store.completo(rdo));
+    // Técnico de segurança é só do RDO Final (pedido de 11/11/2026): no Relatório de Campo a
+    // célula fica em branco mesmo quando o RDO tem o nome guardado. `rdo` aqui já é uma cópia.
+    if (campo) rdo.tst = '';
     // Bloqueio lançado em Etapas do Dia (pedido de 10/11/2026): o fim da execução sai já com
     // o desconto e a frase entra nas observações. A conta é feita só aqui, uma vez, em cima
     // das horas guardadas no RDO (que ficam sem o desconto).
@@ -485,48 +562,9 @@ window.Pdf = (() => {
       y = doc.lastAutoTable.finalY + 4;
     }
 
-    // registro fotográfico: as fotos vão junto no PDF, duas por linha
-    if (fotos.length) {
-      const imagens = await Promise.all(fotos.map((p) => (window.Fotos ? window.Fotos.imagem(p) : (p.data || null))));
-      const espaco = 6;
-      const colL = (larg - margem * 2 - espaco) / 2;
-      const fotoA = 64;
-      const linhaA = fotoA + 8;
-      const novaPagina = () => { doc.addPage(); y = 12; };
-      if (y + 6.4 + linhaA > fim) novaPagina();
-      celula(doc, margem, y, larg - margem * 2, 6.4, 'REGISTRO FOTOGRÁFICO', rotulo);
-      y += 6.4 + 2;
-      fotos.forEach((p, i) => {
-        const coluna = i % 2;
-        if (coluna === 0 && i > 0) y += linhaA;
-        if (coluna === 0 && y + linhaA > fim) novaPagina();
-        const x = margem + coluna * (colL + espaco);
-        doc.setFillColor(...CINZA);
-        doc.setDrawColor(0, 0, 0);
-        doc.setLineWidth(FINA);
-        doc.rect(x, y, colL, fotoA, 'FD');
-        if (!imagemNoQuadro(doc, imagens[i], x, y, colL, fotoA)) {
-          doc.setFont('helvetica', 'normal');
-          doc.setFontSize(8);
-          doc.setTextColor(120, 120, 120);
-          doc.text('Foto indisponível neste aparelho', x + colL / 2, y + fotoA / 2, { align: 'center' });
-        }
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(7.5);
-        doc.setTextColor(60, 60, 60);
-        doc.text(`Foto ${i + 1}`, x, y + fotoA + 3.5);
-      });
-      y += linhaA + 2;
-      // legendas completas (data, hora, GPS e descrição) em tabela paginada
-      doc.autoTable({
-        startY: Math.min(y, fim - 10), margin: { top: 12, bottom: 12, left: margem, right: margem },
-        body: fotos.map((p, i) => [`Foto ${i + 1}`, [p.date && fmtDate(p.date), p.time,
-          p.latitude != null && p.longitude != null ? `GPS ${Number(p.latitude).toFixed(6)}, ${Number(p.longitude).toFixed(6)}` : '', p.desc].filter(Boolean).join(' — ')]),
-        theme: 'grid', styles: { fontSize: 8, cellPadding: PAD, overflow: 'linebreak', lineColor: [0, 0, 0], lineWidth: FINA },
-        columnStyles: { 0: { cellWidth: 22, fontStyle: 'bold' } },
-      });
-      y = doc.lastAutoTable.finalY + 4;
-    }
+    // Fotos só no Relatório de Campo, em anexo depois da folha. O RDO Final não leva foto
+    // (pedido de 10/11/2026): é só a folha do cliente.
+    if (campo && fotos.length) await fotosDoCampo(doc, fotos, y);
 
     // Só o modelo (pedido de 09/11/2026): a foto do rosto e a assinatura desenhada do
     // cadastro não entram no PDF: o bloco antigo de quem preencheu saiu junto.
@@ -534,242 +572,23 @@ window.Pdf = (() => {
 
   // ---------------------------------------------------------------- relatório de campo
   /*
-   * Relatório de Campo (pedido de 10/11/2026): o relatório padrão do app, o que existia antes
-   * da folha "RDO ADM" do cliente. Faixa laranja, identificação e uma tabela por seção, só
-   * com o que foi lançado: seção vazia não aparece, e não entram "Tiago" nem o técnico de segurança
-   * de segunda a sexta (são do RDO Final). As etapas saem com as horas da tela Etapas do Dia.
-   * O RDO Final (a folha do cliente) continua em `escrever`.
+   * Relatório de Campo: o que o funcionário gera e manda do campo. Até a v34 era um desenho
+   * próprio (faixa laranja e uma tabela por seção). Pedido de 10/11/2026: padronizar, e ele
+   * passou a sair na mesma folha do RDO Final (ver `escrever`, opção `campo`).
    */
-  const VERMELHO = [198, 40, 40];
-  const VERDE = [46, 125, 50];
-  const AMBAR = [178, 106, 0];
-  const semValor = (v) => v == null || v === '';
-  // número com vírgula, como se escreve aqui (1200,5 e não 1200.5)
-  const numero = (v) => String(v).replace('.', ',');
-
-  async function escreverCampo(doc, rdoBruto) {
-    const rdo = Store.completo(rdoBruto);
-    const larg = doc.internal.pageSize.getWidth();
-    const alt = doc.internal.pageSize.getHeight();
-    const margem = 14;
-    const util = larg - margem * 2;
-    const topo = 16;        // onde o conteúdo recomeça numa página nova
-    const fim = alt - 14;   // o rodapé fica abaixo disto
-    const novaPagina = () => { doc.addPage(); return topo; };
-
-    faixa(doc, 'RELATÓRIO DIÁRIO DE OBRA', margem, 'Relatório de Campo');
-    let y = 33;
-
-    // identificação: número, data, turno e tipo na linha de cima; o resto só se foi preenchido
-    doc.setTextColor(30, 30, 30);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(11);
-    const linhaTopo = [`RDO Nº ${rdo.number || '—'}`, rdo.date && fmtDate(rdo.date), rdo.shift && `Turno ${rdo.shift}`, rdo.maintenanceType]
-      .filter(Boolean).join('  ·  ');
-    const linhasTopo = doc.splitTextToSize(linhaTopo, util);
-    doc.text(linhasTopo, margem, y);
-    y += (linhasTopo.length - 1) * 4.8 + 3;
-    const autor = [rdo.autor?.nome || rdo.donoNome, rdo.autor?.funcao].filter(Boolean).join(' — ');
-    const finalizado = rdo.status === 'final';
-    const quandoFinalizou = (() => {
-      const d = new Date(rdo.finalizedAt || '');
-      if (!finalizado || Number.isNaN(d.getTime())) return '';
-      const dd = (v) => String(v).padStart(2, '0');
-      return ` em ${dd(d.getDate())}/${dd(d.getMonth() + 1)}/${d.getFullYear()} ${dd(d.getHours())}:${dd(d.getMinutes())}`;
-    })();
-    const dados = [
-      ['Local / Mina', rdo.location],
-      ['Cliente', rdo.cliente],
-      ['Complexo', rdo.complexo],
-      ['Gerência', rdo.gerencia],
-      ['Equipe / Coordenação', rdo.equipeCoord],
-      ['Clima', rdo.weather],
-      ['Horário', rdo.startTime || rdo.endTime ? `${rdo.startTime || '—'} às ${rdo.endTime || '—'}` : ''],
-      ['Supervisor', rdo.supervisor],
-      // (técnico de segurança não entra aqui: é posto pelo supervisor, só no RDO Final)
-      ['Lançado por', autor],
-      ['Situação', finalizado ? `Finalizado${quandoFinalizou}` : 'Em aberto'],
-    ].map(([k, v]) => [k, String(v || '').trim()]).filter(([, v]) => v);
-    doc.autoTable({
-      startY: y,
-      margin: { top: topo, bottom: 16, left: margem, right: margem },
-      body: dados,
-      theme: 'plain',
-      styles: { font: 'helvetica', fontSize: 9, cellPadding: { top: 0.6, bottom: 0.6, left: 0, right: 2 }, textColor: [50, 50, 50], overflow: 'linebreak' },
-      columnStyles: { 0: { cellWidth: 40, fontStyle: 'bold', textColor: [110, 110, 110] } },
-    });
-    y = doc.lastAutoTable.finalY + 2.5;
-    doc.setDrawColor(...ORANGE);
-    doc.setLineWidth(0.7);
-    doc.line(margem, y, larg - margem, y);
-    y += 7;
-
-    // seção numerada em tabela; some inteira quando não há linha
-    let n = 0;
-    const titulo = (texto, cor = ORANGE) => {
-      n += 1;
-      if (y + 20 > fim) y = novaPagina();
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9.5);
-      doc.setTextColor(...cor);
-      doc.text(`${n}. ${texto}`, margem, y);
-      y += 2.5;
-    };
-    const secao = (texto, colunas, corpo, o = {}) => {
-      if (!corpo.length) return;
-      const cor = o.cor || ORANGE;
-      titulo(texto, cor);
-      doc.autoTable({
-        startY: y,
-        margin: { top: topo, bottom: 16, left: margem, right: margem },
-        head: colunas ? [colunas] : undefined,
-        body: corpo,
-        foot: o.pe ? [o.pe] : undefined,
-        theme: 'grid',
-        rowPageBreak: 'auto',
-        styles: { font: 'helvetica', fontSize: 8.5, cellPadding: 2, textColor: [40, 40, 40], lineColor: [220, 220, 220], lineWidth: 0.15, overflow: 'linebreak' },
-        headStyles: { fillColor: cor, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8.5 },
-        footStyles: { fillColor: GRAY, textColor: [40, 40, 40], fontStyle: 'bold' },
-        alternateRowStyles: { fillColor: GRAY },
-        columnStyles: o.larguras || {},
-        didParseCell: (d) => {
-          if (d.section !== 'body' || !o.colorir) return;
-          const tinta = o.colorir(d.column.index, String(d.cell.text?.[0] ?? ''));
-          if (tinta) { d.cell.styles.textColor = tinta; d.cell.styles.fontStyle = 'bold'; }
-        },
-      });
-      y = doc.lastAutoTable.finalY + 7;
-    };
-
-    // Etapas: as mesmas horas da tela Etapas do Dia e do RDO Final (o que foi salvo ou, onde
-    // nada foi mudado, o horário fixo do modelo), com o fim da execução já descontado quando há
-    // bloqueio, e o bloqueio fechando a lista. Antes só entrava etapa salva: quem via as horas
-    // na tela e não tocava em Salvar mandava o relatório sem a seção.
-    const contaBloqueio = Store.bloqueioDoRdo(rdo);
-    const linhasEtapas = Store.etapasComDesconto(rdo)
-      .map((horas, i) => [Store.ETAPAS[i].replace(/:\s*$/, ''), horas.inicio || '—', horas.fim || '—']);
-    if (contaBloqueio) {
-      linhasEtapas.push([
-        `ESPERA POR BLOQUEIO (${Store.fmtHoras(contaBloqueio.minutos)})${contaBloqueio.motivo ? `: ${contaBloqueio.motivo}` : ''}`,
-        contaBloqueio.inicio, contaBloqueio.fim,
-      ]);
-    }
-    secao('ETAPAS DO DIA', ['Etapa', 'Início', 'Fim'], linhasEtapas,
-      { larguras: { 1: { cellWidth: 20, halign: 'center' }, 2: { cellWidth: 20, halign: 'center' } } });
-
-    secao('MÃO DE OBRA', ['Nome', 'Função', 'Equipe', 'Presença', 'Horas'],
-      rdo.workforce.map((w) => [w.name || '—', w.role || '—', w.team || '—', w.status || '—', semValor(w.hours) ? '—' : `${numero(Number(w.hours) || 0)}h`]),
-      {
-        larguras: { 0: { cellWidth: 58 }, 3: { cellWidth: 24 }, 4: { cellWidth: 18, halign: 'right' } },
-        colorir: (coluna, texto) => (coluna === 3 && texto === 'Falta' ? VERMELHO : null),
-      });
-
-    secao('EQUIPAMENTOS', ['Equipamento', 'Status', 'Horímetro'],
-      rdo.equipmentList.map((e) => [
-        e.name || '—', e.status || '—',
-        semValor(e.hoursStart) && semValor(e.hoursEnd) ? '—'
-          : `${semValor(e.hoursStart) ? '?' : `${numero(e.hoursStart)}h`} a ${semValor(e.hoursEnd) ? '?' : `${numero(e.hoursEnd)}h`}`,
-      ]),
-      { larguras: { 1: { cellWidth: 32 }, 2: { cellWidth: 44, halign: 'right' } } });
-
-    secao('ATIVIDADES REALIZADAS', ['OS', 'Tipo', 'Descrição', 'Execução', 'Status'],
-      rdo.tasks.map((t) => {
-        const p = Number(t.progress) || 0;
-        const complemento = [t.tag && `TAG ${t.tag}`, t.area && `Área: ${t.area}`, t.backlogDe && 'veio do backlog'].filter(Boolean).join(' · ');
-        return [
-          t.os || '—', t.maintenanceType || '—',
-          [t.description, complemento, t.notes].filter(Boolean).join('\n'),
-          semValor(t.progress) ? '—' : `${p}%`,
-          t.status || (p >= 100 ? 'Concluído' : 'Em Andamento'),
-        ];
-      }),
-      {
-        larguras: { 0: { cellWidth: 24 }, 1: { cellWidth: 22 }, 3: { cellWidth: 20, halign: 'right' }, 4: { cellWidth: 28 } },
-        colorir: (coluna, texto) => (coluna !== 4 ? null : (texto === 'Concluído' ? VERDE : AMBAR)),
-      });
-
-    secao('OCORRÊNCIAS', ['Tipo', 'Descrição', 'Hora', 'Local'],
-      rdo.occurrences.map((o) => [o.type || '—', o.description || '', o.time || '—', o.location || '—']),
-      { cor: VERMELHO, larguras: { 0: { cellWidth: 28 }, 2: { cellWidth: 16, halign: 'center' }, 3: { cellWidth: 40 } } });
-
-    // horas paradas saíram das telas, mas RDO antigo que tem parada continua mostrando
-    const paradas = rdo.stoppages;
-    secao('HORAS PARADAS', ['Motivo', 'Parou', 'Voltou', 'Tempo', 'Observação'],
-      paradas.map((p) => [p.reason || '—', p.start || '—', p.end || '—', Store.fmtHoras(Store.minutosParada(p)), p.note || '']),
-      {
-        larguras: { 1: { cellWidth: 17, halign: 'center' }, 2: { cellWidth: 17, halign: 'center' }, 3: { cellWidth: 17, halign: 'right' } },
-        pe: ['Total parado', '', '', Store.fmtHoras(paradas.reduce((s, p) => s + Store.minutosParada(p), 0)), ''],
-      });
-
-    const notas = String(rdo.notes || '').trim();
-    secao('OBSERVAÇÕES GERAIS', null, notas ? [[notas]] : []);
-
-    // registro fotográfico: duas fotos por linha, cada uma com a legenda dela embaixo
-    const fotos = rdo.photos;
-    if (fotos.length) {
-      const imagens = await Promise.all(fotos.map((p) => (window.Fotos ? window.Fotos.imagem(p) : (p.data || null))));
-      const espaco = 6;
-      const colL = (util - espaco) / 2;
-      const fotoA = 62;
-      const altLinha = 3.2;
-      const MAX_LINHAS = 5;
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(7.5);
-      const legendas = fotos.map((p, i) => {
-        const gps = p.latitude != null && p.longitude != null
-          ? `GPS ${Number(p.latitude).toFixed(6)}, ${Number(p.longitude).toFixed(6)}` : '';
-        const cabeca = [`Foto ${i + 1}`, [p.date && fmtDate(p.date), p.time].filter(Boolean).join(' '), gps].filter(Boolean).join(' · ');
-        const linhas = doc.splitTextToSize([cabeca, String(p.desc || '').trim()].filter(Boolean).join(' — '), colL);
-        if (linhas.length <= MAX_LINHAS) return linhas;
-        const corte = linhas.slice(0, MAX_LINHAS);
-        corte[MAX_LINHAS - 1] = `${corte[MAX_LINHAS - 1].replace(/.{0,3}$/, '')}…`;
-        return corte;
-      });
-      // o título não fica sozinho no pé da página: vai junto com a primeira linha de fotos
-      if (y + 6 + fotoA + legendas[0].length * altLinha + 4 > fim) y = novaPagina();
-      titulo('REGISTRO FOTOGRÁFICO');
-      y += 1;
-      for (let i = 0; i < fotos.length; i += 2) {
-        const par = [i, i + 1].filter((k) => k < fotos.length);
-        const altLegenda = Math.max(...par.map((k) => legendas[k].length)) * altLinha + 3;
-        if (y + fotoA + altLegenda > fim) y = novaPagina();
-        par.forEach((k, coluna) => {
-          const x = margem + coluna * (colL + espaco);
-          doc.setFillColor(...GRAY);
-          doc.setDrawColor(200, 200, 200);
-          doc.setLineWidth(FINA);
-          doc.rect(x, y, colL, fotoA, 'FD');
-          if (!imagemNoQuadro(doc, imagens[k], x, y, colL, fotoA)) {
-            doc.setFont('helvetica', 'normal');
-            doc.setFontSize(8);
-            doc.setTextColor(120, 120, 120);
-            doc.text('Foto indisponível neste aparelho', x + colL / 2, y + fotoA / 2, { align: 'center' });
-          }
-          doc.setFont('helvetica', 'normal');
-          doc.setFontSize(7.5);
-          doc.setTextColor(60, 60, 60);
-          doc.text(legendas[k], x, y + fotoA + 3.4);
-        });
-        y += fotoA + altLegenda + 2;
-      }
-    }
-
-    rodape(doc, [`RDO ${rdo.number || ''}`.trim(), rdo.date && fmtDate(rdo.date), 'Relatório de Campo']);
-  }
-
   /** `formato: 'campo'` pede o Relatório de Campo; sem isso sai o RDO Final (folha do cliente). */
   const ehCampo = (opcoes) => opcoes?.formato === 'campo';
 
   /** Monta o PDF de um RDO (com as fotos) e devolve o documento e o nome do arquivo. */
   async function montar(rdo, opcoes) {
     const doc = novoDoc();
-    if (ehCampo(opcoes)) {
-      await escreverCampo(doc, rdo);
-      return { doc, nome: `Relatorio_de_Campo_${rdo.number}.pdf` };
-    }
-    await escrever(doc, rdo);
-    rodapeFormulario(doc, [{ de: 1, ate: doc.getNumberOfPages(), rdo }]);
-    return { doc, nome: `RDO_${rdo.number}.pdf` };
+    const campo = ehCampo(opcoes);
+    await escrever(doc, rdo, { campo });
+    // o rodapé de controle é o que diferencia o Relatório de Campo: diz o que é e quem lançou
+    const autor = String(rdo?.autor?.nome || rdo?.donoNome || '').trim();
+    const marca = campo ? ['Relatório de Campo', autor && `lançado por ${autor}`].filter(Boolean).join(' · ') : '';
+    rodapeFormulario(doc, [{ de: 1, ate: doc.getNumberOfPages(), rdo, marca }]);
+    return { doc, nome: campo ? `Relatorio_de_Campo_${rdo.number}.pdf` : `RDO_${rdo.number}.pdf` };
   }
 
   /**

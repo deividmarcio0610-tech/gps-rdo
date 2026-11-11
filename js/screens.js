@@ -1112,19 +1112,20 @@ window.Screens = (() => {
 
   /*
    * Abas do RDO escolhido no Gerar Relatório (pedido de 10/11/2026): "RDO Final" é a folha
-   * oficial do cliente; "Relatório de Campo", ao lado, é o relatório padrão do app. A aba
-   * escolhida vale enquanto o app está aberto.
+   * oficial do cliente; "Relatório de Campo", ao lado, é o que vem do campo. Os dois saem na
+   * mesma folha (padronização pedida em 10/11/2026); o de campo não leva o que o supervisor
+   * preenche e traz as fotos em anexo. A aba escolhida vale enquanto o app está aberto.
    */
   let abaRelatorio = '';   // '' = ainda não escolheu: a conta principal abre no RDO Final, o funcionário no Relatório de Campo
   const ABAS_RELATORIO = {
     final: {
       rotulo: 'RDO Final',
-      texto: 'A folha oficial do cliente (modelo RDO ADM): quatro blocos de OM por folha e o registro fotográfico no fim.',
+      texto: 'A folha oficial do cliente (modelo RDO ADM): quatro blocos de OM por folha, sem fotos. As fotos vão no Relatório de Campo.',
       arquivo: (rdo) => `RDO_${rdo.number}.pdf`,
     },
     campo: {
       rotulo: 'Relatório de Campo',
-      texto: 'O relatório padrão do app: identificação e uma tabela por seção, só com o que foi lançado, as etapas do dia e as fotos com a legenda embaixo.',
+      texto: 'O que vem do campo, na mesma folha do RDO Final: só o que foi lançado, sem o que o supervisor preenche, e as fotos em anexo logo depois, cada uma com a legenda embaixo.',
       arquivo: (rdo) => `Relatorio_de_Campo_${rdo.number}.pdf`,
     },
   };
@@ -1135,7 +1136,7 @@ window.Screens = (() => {
     const aba = ABAS_RELATORIO[abaAtual()];
     return `
       <p class="dica">${esc(aba.texto)}</p>
-      <button class="btn block" data-act="enviar-pdf" style="background:#25D366;color:#fff">${icon('whatsapp', 18)}<span>Enviar ${esc(aba.rotulo)} com fotos (WhatsApp)</span></button>
+      <button class="btn block" data-act="enviar-pdf" style="background:#25D366;color:#fff">${icon('whatsapp', 18)}<span>Enviar ${esc(aba.rotulo)}${abaAtual() === 'campo' ? ' com fotos' : ''} (WhatsApp)</span></button>
       <button class="btn primary block" data-act="pdf">${icon('output', 18)}Abrir ${esc(aba.rotulo)} em PDF</button>
       <button class="btn ghost block" data-act="baixar-pdf">${icon('download', 16)}Baixar ${esc(aba.rotulo)} em PDF</button>`;
   }
@@ -1258,7 +1259,7 @@ window.Screens = (() => {
             btn.disabled = true;
             try {
               const r = await window.Pdf.gerar(rdo, opcoes);
-              if (r !== 'cancelado') toast(`${arquivo} gerado${rdo.photos.length ? ` com ${rdo.photos.length} foto(s)` : ''}.`);
+              if (r !== 'cancelado') toast(`${arquivo} gerado${formato === 'campo' && rdo.photos.length ? ` com ${rdo.photos.length} foto(s)` : ''}.`);
             } catch (err) {
               toast('Não foi possível gerar o PDF.');
             } finally {
@@ -1270,7 +1271,7 @@ window.Screens = (() => {
           // 1º toque monta o PDF; 2º toque compartilha (o Safari só deixa dentro de um toque).
           const btnEnviar = painel.querySelector('[data-act="enviar-pdf"]');
           const rotulo = btnEnviar.querySelector('span');
-          const textoBotao = `Enviar ${aba.rotulo} com fotos (WhatsApp)`;
+          const textoBotao = `Enviar ${aba.rotulo}${formato === 'campo' ? ' com fotos' : ''} (WhatsApp)`;
           let pronto = null;
           const legenda = `${aba.rotulo} — RDO ${rdo.number} - ${fmtDate(rdo.date)}${rdo.location ? ` - ${rdo.location}` : ''}`;
           const depois = (r) => {

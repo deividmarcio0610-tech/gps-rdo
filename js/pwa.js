@@ -137,6 +137,12 @@ window.Pwa = (() => {
    * início ou no APK). Ao publicar uma versão com novidade, acrescente uma linha aqui.
    */
   const NOVIDADES = {
+    v35: [
+      'Relatório de Campo agora sai na mesma folha do RDO Final, com as fotos do campo em anexo logo depois.',
+      'RDO Final sai sem fotos: as fotos vão só no Relatório de Campo.',
+      'Blocos de OM sem linhas por dentro: a descrição corre livre, logo abaixo do título.',
+      'Linhas dos horários mais baixas, com mais espaço para a descrição das OMs.',
+    ],
     v34: [
       'Cadastro funciona sem internet: a conta é criada no aparelho e vai para o banco sozinha quando o sinal voltar.',
     ],
