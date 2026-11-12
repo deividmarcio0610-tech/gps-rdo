@@ -10,7 +10,7 @@ window.Pwa = (() => {
   const ouvintes = [];
 
   // versão do código deste build; subir junto com o versionName do Gradle e com VERSAO do sw.js
-  const VERSAO_APP = '1.9';
+  const VERSAO_APP = '1.10';
   const APK_URL = 'https://github.com/deividmarcio0610-tech/gps-rdo/releases/latest/download/GPS-RDO.apk';
   const NATIVO = () => Boolean(window.Capacitor?.isNativePlatform?.());
 
@@ -137,6 +137,9 @@ window.Pwa = (() => {
    * início ou no APK). Ao publicar uma versão com novidade, acrescente uma linha aqui.
    */
   const NOVIDADES = {
+    v36: [
+      'App Android 1.10: traz os relatórios novos (Relatório de Campo na folha do RDO Final com as fotos em anexo; RDO Final sem fotos).',
+    ],
     v35: [
       'Relatório de Campo agora sai na mesma folha do RDO Final, com as fotos do campo em anexo logo depois.',
       'RDO Final sai sem fotos: as fotos vão só no Relatório de Campo.',
