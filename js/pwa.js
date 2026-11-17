@@ -10,7 +10,7 @@ window.Pwa = (() => {
   const ouvintes = [];
 
   // versão do código deste build; subir junto com o versionName do Gradle e com VERSAO do sw.js
-  const VERSAO_APP = '1.10';
+  const VERSAO_APP = '1.11';
   const APK_URL = 'https://github.com/deividmarcio0610-tech/gps-rdo/releases/latest/download/GPS-RDO.apk';
   const NATIVO = () => Boolean(window.Capacitor?.isNativePlatform?.());
 
@@ -90,6 +90,35 @@ window.Pwa = (() => {
     setInterval(checarAtualizacao, 5 * 60 * 1000);
   }
 
+  /**
+   * Botão "Atualizar o app" da tela inicial (pedido de 17/11/2026). No APK: confere a release
+   * publicada e, havendo versão nova, abre o download (o Android pede um toque para instalar).
+   * No navegador / tela de início: relê o sw.js; havendo versão nova ela entra e o app recarrega.
+   */
+  async function atualizarAgora() {
+    const aviso = (t) => window.UI?.toast?.(t);
+    if (!navigator.onLine) { aviso('Sem internet: conecte e toque de novo.'); return 'sem-rede'; }
+    if (NATIVO()) {
+      const nova = await versaoNovaDoApk();
+      if (!nova) { aviso(`Você já está na última versão do app (${VERSAO_APP}).`); return 'em-dia'; }
+      aviso(`Baixando a versão ${nova.versao}. Depois toque no arquivo para instalar por cima.`);
+      window.open(nova.url, '_system');
+      return 'baixando';
+    }
+    if (!registro) { location.reload(); return 'recarregado'; }
+    aviso('Procurando versão nova...');
+    try { await registro.update(); } catch { aviso('Não consegui conferir agora. Tente de novo.'); return 'erro'; }
+    // achou: o service worker novo instala, assume e a página recarrega sozinha (controllerchange)
+    const chegando = registro.installing || registro.waiting;
+    if (chegando) {
+      chegando.postMessage?.('ativar-agora');
+      aviso('Versão nova encontrada. O app vai recarregar.');
+      return 'atualizando';
+    }
+    aviso(`Você já está na última versão${await versaoDoSite().then((v) => (v ? ` (${v})` : ''))}.`);
+    return 'em-dia';
+  }
+
   /** Pede ao navegador para reler o sw.js; havendo versão nova, ela entra e a página recarrega. */
   function checarAtualizacao() {
     if (!registro || !navigator.onLine) return Promise.resolve(false);
@@ -137,6 +166,14 @@ window.Pwa = (() => {
    * início ou no APK). Ao publicar uma versão com novidade, acrescente uma linha aqui.
    */
   const NOVIDADES = {
+    v37: [
+      'Botão "Atualizar o app" na tela inicial: confere e instala a versão nova na hora.',
+      'Análise dos RDOs (conta principal): números de todos os RDOs da equipe, tarefas executadas e em andamento, equipamentos parados, horas paradas, ocorrências, por pessoa e por dia, com exportação para Excel.',
+      'Nº do RDO muda na hora em que a data do cabeçalho é trocada.',
+      'Nº da OS agora é obrigatório na tarefa.',
+      'PDF com nome padrão: "RDO 20261028-01 - NOME - 28-10-2026".',
+      'Assinatura acompanha o dedo mesmo quando a tela muda de tamanho.',
+    ],
     v36: [
       'App Android 1.10: traz os relatórios novos (Relatório de Campo na folha do RDO Final com as fotos em anexo; RDO Final sem fotos).',
     ],
@@ -291,7 +328,7 @@ window.Pwa = (() => {
 
   return {
     registrar, escutarConvite, podeInstalar, instalar, aoMudar, instalado, ehIOS, ehAndroid,
-    checarAtualizacao, versao: () => VERSAO_APP, apkUrl: APK_URL, versaoNovaDoApk, versaoDoSite, iniciarAvisos, oferecerApkNovo,
+    checarAtualizacao, atualizarAgora, versao: () => VERSAO_APP, apkUrl: APK_URL, versaoNovaDoApk, versaoDoSite, iniciarAvisos, oferecerApkNovo,
     NOVIDADES,
   };
 })();

@@ -1035,3 +1035,54 @@ body.campo .ver-senha { font-size: 15px; }
 }
 .faixa-atualizacao span { flex: 1; }
 .faixa-atualizacao .btn { padding: 8px 12px; font-size: 12.5px; flex: 0 0 auto; }
+
+/* ---------- Análise dos RDOs (tipo BI, 17/11/2026) */
+.action-card .sub-card { font-weight: 400; opacity: 0.75; font-size: 11px; }
+.bi-grade { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin: 10px 0; }
+.bi-card { background: var(--surface); border-radius: var(--radius); padding: 10px 12px; box-shadow: var(--shadow); border-left: 5px solid var(--orange); }
+.bi-card.bi-green { border-left-color: var(--green); }
+.bi-card.bi-amber { border-left-color: var(--amber); }
+.bi-card.bi-red { border-left-color: var(--red); }
+.bi-valor { font-size: 22px; font-weight: 700; line-height: 1.1; }
+.bi-rotulo { font-size: 12px; font-weight: 600; margin-top: 2px; }
+.bi-sub { font-size: 11px; color: var(--text-soft); }
+.bi-barras { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.bi-barra { display: grid; grid-template-columns: minmax(80px, 34%) 1fr auto; gap: 8px; align-items: center; font-size: 12px; }
+.bi-nome { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bi-trilho { background: var(--surface-2); border-radius: 4px; height: 12px; overflow: hidden; }
+.bi-trilho span { display: block; height: 100%; background: var(--orange); border-radius: 4px; }
+.bi-num { font-weight: 700; min-width: 34px; text-align: right; }
+.bi-tabela { overflow-x: auto; margin-bottom: 10px; border-radius: var(--radius); box-shadow: var(--shadow); }
+.bi-tabela table { width: 100%; border-collapse: collapse; font-size: 12px; background: var(--surface); }
+.bi-tabela th { background: var(--orange); color: #fff; text-align: left; padding: 6px 8px; white-space: nowrap; }
+.bi-tabela td { padding: 5px 8px; border-top: 1px solid var(--surface-2); vertical-align: top; }
+
+/* ---- Análise no estilo do painel do LubControl ---- */
+.bi-card { text-align: center; padding: 12px 8px; }
+.bi-card .bi-valor { font-size: 26px; font-weight: 800; line-height: 1.1; }
+.bi-resumo { background: var(--surface); border-left: 5px solid var(--orange); border-radius: var(--radius); box-shadow: var(--shadow); padding: 10px 12px; font-size: 13px; line-height: 1.5; margin: 10px 0; }
+.bi-critico { color: var(--red); font-weight: 800; }
+.bi-painel { background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); padding: 12px; margin: 10px 0; }
+.bi-titulo { font-weight: 800; font-size: 14px; text-transform: uppercase; letter-spacing: .3px; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 2px solid var(--orange); }
+.bi-rosca { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.bi-rosca svg { width: 170px; height: 170px; flex: 0 0 auto; margin: 0 auto; }
+.bi-fatia { fill: #fff; font-size: 11px; font-weight: 700; text-anchor: middle; dominant-baseline: middle; }
+.bi-total { font-size: 26px; font-weight: 800; text-anchor: middle; fill: currentColor; }
+.bi-total-rot { font-size: 10px; text-anchor: middle; fill: #888; letter-spacing: .5px; }
+.bi-legenda { flex: 1 1 180px; border-collapse: collapse; font-size: 12px; }
+.bi-legenda th { font-size: 11px; color: #888; text-align: right; padding: 2px 4px; }
+.bi-legenda td { padding: 4px; border-top: 1px solid var(--surface-2); }
+.bi-legenda td + td { text-align: right; white-space: nowrap; }
+.bi-ponto { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.bi-hbar { display: flex; flex-direction: column; gap: 6px; }
+.bi-hlin { display: grid; grid-template-columns: minmax(80px, 38%) 1fr; align-items: center; gap: 8px; font-size: 12px; }
+.bi-hnome { text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.bi-htrilho { display: flex; align-items: center; gap: 6px; }
+.bi-htrilho > span { display: block; height: 16px; border-radius: 2px; background: #f3b79c; }
+.bi-hlin.forte .bi-htrilho > span { background: var(--orange, #e8693a); }
+.bi-htrilho b { font-size: 12px; white-space: nowrap; }
+.bi-sublegenda { font-size: 12px; color: #666; margin-bottom: 6px; display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.bi-tracejado { display: inline-block; width: 22px; border-top: 2px dashed #444; margin: 0 4px 0 12px; }
+.bi-rolar { overflow-x: auto; }
+.bi-cval { font-size: 11px; font-weight: 700; text-anchor: middle; fill: currentColor; }
+.bi-cdia { font-size: 10px; text-anchor: middle; fill: #777; }

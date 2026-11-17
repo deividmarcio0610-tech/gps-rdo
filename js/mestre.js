@@ -223,7 +223,8 @@ window.Mestre = (() => {
       }
       avisoGerar = 'Montando o PDF...';
       app?.render?.();
-      const nome = modo === 'dia' ? `RDO_${dia}.pdf` : `RDO_${de}_a_${ate}.pdf`;
+      const br = (iso) => String(iso).slice(0, 10).split('-').reverse().join('-');
+      const nome = modo === 'dia' ? `RDO - ${br(dia)}.pdf` : `RDO - ${br(de)} a ${br(ate)}.pdf`;
       const titulo = modo === 'dia' ? `RDO ${fmtDate(dia)}` : `RDOs de ${fmtDate(de)} a ${fmtDate(ate)}`;
       // dia com vários RDOs não repete folha: junta as atividades e a equipe num só relatório
       const paraPdfFinal = modo === 'dia' && rdos.length > 1 ? [juntarDoDia(rdos, dia)] : rdos;

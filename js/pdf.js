@@ -579,6 +579,20 @@ window.Pdf = (() => {
   /** `formato: 'campo'` pede o Relatório de Campo; sem isso sai o RDO Final (folha do cliente). */
   const ehCampo = (opcoes) => opcoes?.formato === 'campo';
 
+  /**
+   * Nome padrão do arquivo (pedido do Tiago em 17/11/2026, no modelo "RDO TE 4605 - HIGOR - 22-10-2026"):
+   * "RDO 20261028-01 - NOME - 28-10-2026.pdf". Sem acento nem caractere que o Windows recusa.
+   */
+  function nomeArquivo(rdo, campo) {
+    const limpo = (t) => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/[^\w\- ]+/g, ' ').replace(/\s+/g, ' ').trim();
+    const autor = limpo(rdo?.autor?.nome || rdo?.donoNome).toUpperCase();
+    const [a, m, d] = String(rdo?.date || '').slice(0, 10).split('-');
+    const data = a && m && d ? `${d}-${m}-${a}` : '';
+    const partes = [`${campo ? 'Relatorio de Campo' : 'RDO'} ${limpo(rdo?.number)}`, autor, data].filter(Boolean);
+    return `${partes.join(' - ')}.pdf`;
+  }
+
   /** Monta o PDF de um RDO (com as fotos) e devolve o documento e o nome do arquivo. */
   async function montar(rdo, opcoes) {
     const doc = novoDoc();
@@ -588,7 +602,7 @@ window.Pdf = (() => {
     const autor = String(rdo?.autor?.nome || rdo?.donoNome || '').trim();
     const marca = campo ? ['Relatório de Campo', autor && `lançado por ${autor}`].filter(Boolean).join(' · ') : '';
     rodapeFormulario(doc, [{ de: 1, ate: doc.getNumberOfPages(), rdo, marca }]);
-    return { doc, nome: campo ? `Relatorio_de_Campo_${rdo.number}.pdf` : `RDO_${rdo.number}.pdf` };
+    return { doc, nome: nomeArquivo(rdo, campo) };
   }
 
   /**
@@ -780,5 +794,5 @@ window.Pdf = (() => {
     };
   }
 
-  return { abrir, gerar, preparar, montar, gerarVarios, montarVarios, resumoMes, nomeMes };
+  return { abrir, gerar, preparar, montar, gerarVarios, montarVarios, resumoMes, nomeMes, nomeArquivo };
 })();

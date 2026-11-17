@@ -478,6 +478,12 @@ window.Store = (() => {
       return db.employees.length < antes && save();
     },
 
+    /** Só mostra qual número a data daria, sem gastar o número (tela do cabeçalho). */
+    previaNumero(dataIso) {
+      recarregarSeMudou();
+      return nextNumber(dataIso);
+    },
+
     /** Número novo para outra data (a data do cabeçalho mudou): o número sempre acompanha a data. */
     numeroPara(dataIso) {
       const numero = nextNumber(dataIso);

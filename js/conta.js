@@ -194,6 +194,7 @@ window.Conta = (() => {
     Store.usarConta('');
     // lista e PDF que a conta principal deixou montados não ficam para a conta seguinte
     window.Mestre?.limpar?.();
+    window.Analise?.limpar?.();
     return id;
   }
 
@@ -749,9 +750,14 @@ window.Conta = (() => {
     let traco = false;
     let vazia = true;
     let pontos = [];
+    let tracos = [];   // cada traço separado, para redesenhar quando o quadro muda de tamanho
 
+    // O quadro pode ser ligado ainda sem tamanho (folha abrindo, teclado subindo): aí o desenho
+    // saía longe do dedo (queixa de 17/11/2026, "dificuldade de assinatura"). Agora o tamanho
+    // é conferido a cada toque e o que já foi desenhado é refeito no tamanho novo.
+    const dprAtual = () => Math.min(2, window.devicePixelRatio || 1);
     function ajustar() {
-      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const dpr = dprAtual();
       const r = canvas.getBoundingClientRect();
       if (!r.width) return;
       canvas.width = Math.round(r.width * dpr);
@@ -761,7 +767,22 @@ window.Conta = (() => {
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.strokeStyle = '#111';
+      ctx.fillStyle = '#111';
+      tracos.forEach(desenharTraco);
     }
+    function desenharTraco(t) {
+      if (!t.length) return;
+      if (t.length === 1) { ctx.beginPath(); ctx.arc(t[0].x, t[0].y, 1.2, 0, Math.PI * 2); ctx.fill(); return; }
+      ctx.beginPath();
+      ctx.moveTo(t[0].x, t[0].y);
+      t.slice(1).forEach((p) => ctx.lineTo(p.x, p.y));
+      ctx.stroke();
+    }
+    const foraDoTamanho = () => {
+      const r = canvas.getBoundingClientRect();
+      return r.width > 0 && (canvas.width !== Math.round(r.width * dprAtual())
+        || canvas.height !== Math.round(r.height * dprAtual()));
+    };
     function limpar() {
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -769,6 +790,7 @@ window.Conta = (() => {
       ctx.restore();
       vazia = true;
       pontos = [];
+      tracos = [];
       canvas.dataset.vazia = '1';
     }
     const posicao = (e) => {
@@ -779,19 +801,25 @@ window.Conta = (() => {
       if (canvas.dataset.travada) return;
       e.preventDefault();
       try { canvas.setPointerCapture?.(e.pointerId); } catch { /* Safari antigo não aceita */ }
+      if (foraDoTamanho()) ajustar();
       traco = true;
       vazia = false;
       canvas.dataset.vazia = '0';
       const p = posicao(e);
       pontos.push(p);
-      ctx.beginPath();
-      ctx.moveTo(p.x, p.y);
+      tracos.push([p]);
+      desenharTraco([p]);
     });
     canvas.addEventListener('pointermove', (e) => {
       if (!traco) return;
       e.preventDefault();
+      const atual = tracos[tracos.length - 1];
+      const anterior = atual[atual.length - 1];
       const p = posicao(e);
       pontos.push(p);
+      atual.push(p);
+      ctx.beginPath();
+      ctx.moveTo(anterior.x, anterior.y);
       ctx.lineTo(p.x, p.y);
       ctx.stroke();
     });
@@ -801,8 +829,8 @@ window.Conta = (() => {
     canvas.addEventListener('pointerleave', soltar);
 
     ajustar();
-    // quadro em branco acompanha a janela; com desenho não mexe (redimensionar apagaria o traço)
-    aoRedimensionar = () => { if (vazia && canvas.isConnected) ajustar(); };
+    // o quadro acompanha a janela; o que já foi desenhado é refeito no tamanho novo
+    aoRedimensionar = () => { if (canvas.isConnected && foraDoTamanho()) ajustar(); };
 
     return {
       vazia: () => vazia,
@@ -1326,6 +1354,7 @@ window.Conta = (() => {
             vista = null;
             Store.usarConta('');
             window.Mestre?.limpar?.();
+            window.Analise?.limpar?.();
             redesenhar();
           }
           return;

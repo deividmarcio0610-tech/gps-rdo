@@ -36,6 +36,7 @@ window.Screens = (() => {
     conta: 'Minha Conta',
     equipe: 'RDOs da Equipe',
     controle: 'Controle de RDO',
+    analise: 'Análise dos RDOs',
     sair: 'Sair da conta',
   };
 
@@ -180,6 +181,8 @@ window.Screens = (() => {
           ${window.Conta?.ehMestre?.() ? `<button class="action-card" data-go="month">${icon('chart')}Resumo do Mês</button>` : ''}
           ${window.Conta?.ehMestre?.() ? `<button class="action-card" data-act="controle-aba">${icon('clipboard')}Controle de RDO</button>` : ''}
           ${window.Conta?.ehMestre?.() ? `<button class="action-card wide" data-go="equipe">${icon('users', 20)}RDOs da Equipe</button>` : ''}
+          ${window.Conta?.ehMestre?.() ? `<button class="action-card wide" data-go="analise">${icon('chart', 20)}Análise dos RDOs (números e Excel)</button>` : ''}
+          <button class="action-card wide neutro-card" data-act="atualizar-app">${icon('refresh', 20)}Atualizar o app<span class="sub-card" data-versao-app></span></button>
           <button class="action-card wide neutro-card" data-go="backup">${icon('shield', 20)}Cópia de Segurança</button>
           <button class="action-card wide neutro-card" data-go="conta">${icon('lock', 20)}Minha Conta</button>
           <button class="action-card wide danger-card" data-go="reports">${icon('trash', 20)}Apagar Relatórios</button>
@@ -190,6 +193,17 @@ window.Screens = (() => {
       bind(root) {
         root.querySelectorAll('[data-go]').forEach((b) => {
           b.addEventListener('click', () => app.go(b.dataset.go));
+        });
+        // pedido de 17/11/2026: botão de atualizar já na tela inicial
+        const versao = root.querySelector('[data-versao-app]');
+        if (versao) {
+          versao.textContent = ` · versão ${window.Pwa?.versao?.() || ''}`;
+          window.Pwa?.versaoDoSite?.().then((v) => { if (v) versao.textContent += ` (${v})`; }).catch(() => {});
+        }
+        root.querySelector('[data-act="atualizar-app"]')?.addEventListener('click', async (ev) => {
+          const botao = ev.currentTarget;
+          botao.disabled = true;
+          try { await window.Pwa?.atualizarAgora?.(); } finally { botao.disabled = false; }
         });
         // pedido de 09/11/2026: Gerar Relatório abre numa aba nova do navegador, com o RDO aberto.
         // No APK não há abas (window.open iria para o navegador do sistema): abre a tela no app.
@@ -240,7 +254,7 @@ window.Screens = (() => {
         <div class="form-grid">
           <div class="field full">
             <label>Nº RDO</label>
-            <input type="text" value="${esc(rdo.number)}" readonly>
+            <input type="text" id="h-numero" value="${esc(rdo.number)}" readonly>
           </div>
           <div class="field full">
             <label for="h-date">Data</label>
@@ -298,6 +312,15 @@ window.Screens = (() => {
         </fieldset>
         ${trava ? '' : '<button class="btn primary block" data-act="salvar" style="margin-top:4px">Salvar Cabeçalho</button>'}`,
       bind(root) {
+        // o número acompanha a data já na tela (vídeo do Tiago, 17/11/2026): trocou a data,
+        // o Nº RDO mostra na hora o número daquele dia; o número só é gravado ao salvar
+        const campoNumero = root.querySelector('#h-numero');
+        root.querySelector('#h-date')?.addEventListener('input', (e) => {
+          const nova = e.target.value;
+          if (!nova || !campoNumero) return;
+          campoNumero.value = String(rdo.number).startsWith(`${nova.replace(/-/g, '')}-`)
+            ? rdo.number : Store.previaNumero(nova);
+        });
         root.querySelector('[data-act="salvar"]')?.addEventListener('click', () => {
           const ler = (k) => root.querySelector(`[data-key="${k}"]`);
           const novaData = ler('date').value;
@@ -736,7 +759,7 @@ window.Screens = (() => {
     const campos = (t = {}) => [
       { key: 'description', label: 'Descrição', type: 'textarea', placeholder: 'O que foi executado', value: t.description },
       { key: 'maintenanceType', label: 'Tipo (opcional)', type: 'select', options: [{ value: '', label: 'Selecione' }, ...TIPOS], value: t.maintenanceType },
-      { key: 'os', label: 'Nº da OS', placeholder: 'Opcional', value: t.os },
+      { key: 'os', label: 'Nº da OS', placeholder: 'Obrigatório', value: t.os },
       { key: 'tag', label: 'TAG do equipamento', placeholder: 'Ex.: EQ-12 (vai no bloco de OM)', value: t.tag },
       { key: 'progress', label: 'Execução (%)', type: 'number', max: 100, step: 1, placeholder: 'De 0 a 100', value: t.progress ?? '' },
       { key: 'area', label: 'Área', placeholder: 'Área', value: t.area },
@@ -744,11 +767,13 @@ window.Screens = (() => {
     const ler = (valores) => {
       const desc = String(valores.description || '').trim();
       if (!desc) { toast('Informe a descrição da tarefa.'); return null; }
+      // Nº da OS obrigatório: pedido do Tiago em 17/11/2026 (era opcional)
+      if (!String(valores.os || '').trim()) { toast('Informe o Nº da OS.'); return null; }
       if (valores.progress === '') { toast('Informe a execução (%).'); return null; }
       const bruto = valores.progress;
       const progresso = Math.max(0, Math.min(100, Number.isFinite(bruto) ? bruto : 0));
       return {
-        os: valores.os || '',
+        os: String(valores.os || '').trim(),
         tag: valores.tag || '',
         maintenanceType: valores.maintenanceType || '',
         description: desc,
@@ -1121,12 +1146,12 @@ window.Screens = (() => {
     final: {
       rotulo: 'RDO Final',
       texto: 'A folha oficial do cliente (modelo RDO ADM): quatro blocos de OM por folha, sem fotos. As fotos vão no Relatório de Campo.',
-      arquivo: (rdo) => `RDO_${rdo.number}.pdf`,
+      arquivo: (rdo) => window.Pdf.nomeArquivo(rdo, false),
     },
     campo: {
       rotulo: 'Relatório de Campo',
       texto: 'O que vem do campo, na mesma folha do RDO Final: só o que foi lançado, sem o que o supervisor preenche, e as fotos em anexo logo depois, cada uma com a legenda embaixo.',
-      arquivo: (rdo) => `Relatorio_de_Campo_${rdo.number}.pdf`,
+      arquivo: (rdo) => window.Pdf.nomeArquivo(rdo, true),
     },
   };
   const abaAtual = () => (ABAS_RELATORIO[abaRelatorio] ? abaRelatorio : (window.Conta?.ehMestre?.() ? 'final' : 'campo'));
@@ -1709,10 +1734,13 @@ window.Screens = (() => {
 
   const controle = (rdo) => (window.Mestre && window.Conta?.ehMestre?.() ? window.Mestre.controle(app) : home(rdo));
 
+  // análise tipo BI de todos os RDOs da equipe (pedido de 17/11/2026), só da conta principal
+  const analise = (rdo) => (window.Analise && window.Conta?.ehMestre?.() ? window.Analise.tela(app) : home(rdo));
+
   // página de sair (pedido de 10/11/2026): confirma e leva para a tela de entrar
   const sair = () => window.Conta.telaSair();
 
-  const mapa = { home, header, etapas, workforce, equipment, tasks, occurrences, stops, photos, report, reports, backup, month, roster, conta, equipe, controle, sair };
+  const mapa = { home, header, etapas, workforce, equipment, tasks, occurrences, stops, photos, report, reports, backup, month, roster, conta, equipe, controle, analise, sair };
 
   return {
     boot(appRef) { app = appRef; },
@@ -1720,6 +1748,7 @@ window.Screens = (() => {
     /** Chamado quando o usuário chega numa tela (não a cada redesenho): as listas do banco se renovam. */
     aoEntrar(tela) {
       if (tela === 'equipe' || tela === 'controle') window.Mestre?.aoEntrar?.(tela);
+      if (tela === 'analise') window.Analise?.aoEntrar?.();
     },
     TITULOS,
   };
