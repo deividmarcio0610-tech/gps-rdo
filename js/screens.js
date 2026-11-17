@@ -183,7 +183,7 @@ window.Screens = (() => {
           ${window.Conta?.ehMestre?.() ? `<button class="action-card" data-go="month">${icon('chart')}Resumo do Mês</button>` : ''}
           ${window.Conta?.ehMestre?.() ? `<button class="action-card" data-act="controle-aba">${icon('clipboard')}Controle de RDO</button>` : ''}
           ${window.Conta?.ehMestre?.() ? `<button class="action-card wide" data-go="equipe">${icon('users', 20)}RDOs da Equipe</button>` : ''}
-          ${window.Conta?.ehMestre?.() ? `<button class="action-card wide" data-go="analise">${icon('chart', 20)}Análise dos RDOs (números e Excel)</button>` : ''}
+          ${window.Conta?.ehMestre?.() ? `<button class="action-card" data-go="analise">${icon('chart')}Análise dos RDOs</button>` : ''}
           <button class="action-card wide neutro-card" data-act="atualizar-app">${icon('refresh', 20)}Atualizar o app<span class="sub-card" data-versao-app></span></button>
           <button class="action-card wide neutro-card" data-go="backup">${icon('shield', 20)}Cópia de Segurança</button>
           <button class="action-card wide neutro-card" data-go="conta">${icon('lock', 20)}Minha Conta</button>

@@ -166,6 +166,9 @@ window.Pwa = (() => {
    * início ou no APK). Ao publicar uma versão com novidade, acrescente uma linha aqui.
    */
   const NOVIDADES = {
+    v45: [
+      'Início: Análise dos RDOs virou um quadradinho, igual aos outros do painel.',
+    ],
     v44: [
       'Início: a Galeria de Fotos fica ao lado de Fotos do RDO (saiu do fim da lista).',
     ],
