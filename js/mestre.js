@@ -530,21 +530,20 @@ window.Mestre = (() => {
   const grafia = (w) => w.replace(/th/g, 't').replace(/ph/g, 'f').replace(/y/g, 'i').replace(/w/g, 'v')
     .replace(/z$/, 's').replace(/(.)\1+/g, '$1');
   /** Palavras do nome sem acento, caixa e preposições ("da", "de"...), com a grafia igualada. */
-  const palavrasNome = (n) => String(n || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
-    .split(/[^a-z0-9]+/).filter((x) => x && !['da', 'de', 'do', 'das', 'dos', 'e'].includes(x)).map(grafia);
+  const palavrasCruas = (n) => String(n || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+    .split(/[^a-z0-9]+/).filter((x) => x && !['da', 'de', 'do', 'das', 'dos', 'e'].includes(x));
+  const palavrasNome = (n) => palavrasCruas(n).map(grafia);
 
   /**
-   * Nome da Mão de Obra é a mesma pessoa da conta? Igual, ou todas as palavras do nome mais
-   * curto (pelo menos duas: nome e sobrenome) aparecem no mais comprido — "Tiago Souza" e
-   * "Tiago Souza Silva". Só o primeiro nome não basta: com dois nomes iguais na equipe não dá
-   * para saber qual.
+   * Nome da Mão de Obra é o da conta? Pedido do dono em 17/11/2026: o que estiver escrito,
+   * seja primeiro, segundo ou terceiro nome, entra. Vale quando todas as palavras do nome mais
+   * curto aparecem no mais comprido: "Tiago", "Souza" e "Tiago Silva" batem com "Tiago Souza Silva".
    */
-  function mesmoNome(a, b) {
-    const x = palavrasNome(a); const y = palavrasNome(b);
+  function mesmoNome(a, b, palavras = palavrasNome) {
+    const x = palavras(a); const y = palavras(b);
     if (!x.length || !y.length) return false;
-    if (x.join(' ') === y.join(' ')) return true;
     const [curto, longo] = x.length <= y.length ? [x, y] : [y, x];
-    return curto.length >= 2 && curto.every((w) => longo.includes(w));
+    return curto.every((w) => longo.includes(w));
   }
 
   /** Cada conta (sem a do supervisor) com os RDOs dela no dia; quem mandou e saiu da lista também aparece. */
@@ -561,37 +560,39 @@ window.Mestre = (() => {
       if (conhecidos.has(dono)) return;
       pessoas.push(comRdos({ id: dono, nome: rdos[0].nome || rdos[0].email || 'sem nome', email: rdos[0].email || '', funcao: '' }, rdos));
     });
-    // Pedido de 17/11/2026 (v40): só fica verde quem tem o nome na Mão de Obra (sem Falta) de
-    // algum RDO preenchido do dia — o próprio ou o de outra pessoa. Enviar o RDO sem pôr o
-    // próprio nome na Mão de Obra deixa vermelho. Na dúvida fica vermelho:
-    //  - só entram os RDOs do dia escolhido (ctl.rdos já vem filtrado pelo dia) e preenchidos;
+    // Só fica verde quem tem o nome na Mão de Obra (sem Falta) de algum RDO preenchido do dia,
+    // o próprio ou o de outra pessoa (v40). Desde a v43, por pedido do dono, qualquer parte do
+    // nome vale (ver mesmoNome) e nome que serve para mais de uma conta marca todas elas.
+    //  - nome idêntico ao de alguma conta marca só as contas idênticas;
     //  - linha com Falta não conta; Falta num RDO e presente em outro conta pelo outro;
-    //  - nome que serve para mais de uma conta ("Tiago Souza" com "Tiago Souza Silva" e
-    //    "Tiago Souza Lima") não marca ninguém, a não ser que seja idêntico ao de uma só conta.
+    //  - verde em que não dá para ter certeza (um nome só, grafia diferente, nome que serve para
+    //    várias contas) leva o aviso "Conferir" com o nome como está escrito no RDO.
     const preenchidosDoDia = ctl.rdos.filter((r) => temConteudo(r.json));
     const igual = (a, b) => palavrasNome(a).join(' ') === palavrasNome(b).join(' ');
-    pessoas.forEach((p) => { p.noRdo = []; p.viaOutros = []; p.parecidos = []; });
+    pessoas.forEach((p) => { p.noRdo = []; p.viaOutros = []; p.parecidos = []; p.conferir = []; });
     preenchidosDoDia.forEach((r) => (r.json.workforce || []).forEach((w) => {
       if (!w || w.status === 'Falta' || !String(w.name || '').trim()) return;
-      const iguais = pessoas.filter((p) => igual(w.name, p.nome));
-      let candidatos = iguais.length ? iguais : pessoas.filter((p) => mesmoNome(w.name, p.nome));
-      // Pedido de 17/11: quem tem o nome no relatório tem que subir como feito. Mão de Obra só com
-      // o primeiro nome vale quando só uma conta da equipe tem esse primeiro nome.
-      const pw = palavrasNome(w.name);
-      if (!candidatos.length && pw.length) {
-        candidatos = pessoas.filter((p) => palavrasNome(p.nome)[0] === pw[0]
-          && (pw.length === 1 || palavrasNome(p.nome).length === 1));
-      }
-      if (candidatos.length !== 1) {
-        // não marca, mas mostra no vermelho para o supervisor conferir
-        const parecidos = candidatos.length ? candidatos : pessoas.filter((p) => palavrasNome(p.nome)[0] === pw[0]);
-        parecidos.forEach((p) => { if (!p.parecidos.some((x) => x.r === r && x.nome === w.name)) p.parecidos.push({ r, nome: String(w.name).trim() }); });
+      const escrito = String(w.name).trim();
+      const pw = palavrasNome(escrito);
+      if (!pw.length) return;
+      const iguais = pessoas.filter((p) => igual(escrito, p.nome));
+      const candidatos = iguais.length ? iguais : pessoas.filter((p) => mesmoNome(escrito, p.nome));
+      if (!candidatos.length) {
+        // ninguém: quem tem o mesmo primeiro nome mostra o nome parecido para o supervisor conferir
+        pessoas.filter((p) => palavrasNome(p.nome)[0] === pw[0]).forEach((p) => {
+          if (!p.parecidos.some((x) => x.r === r && x.nome === escrito)) p.parecidos.push({ r, nome: escrito });
+        });
         return;
       }
-      const p = candidatos[0];
-      if (p.noRdo.includes(r)) return;
-      p.noRdo.push(r);
-      if (p.id !== r.dono) p.viaOutros.push(r);
+      candidatos.forEach((p) => {
+        if (p.noRdo.includes(r)) return;
+        const motivo = candidatos.length > 1 ? `serve para ${candidatos.length} contas`
+          : !mesmoNome(escrito, p.nome, palavrasCruas) ? 'grafia diferente'
+            : Math.min(pw.length, palavrasNome(p.nome).length) === 1 && !igual(escrito, p.nome) ? 'um nome só' : '';
+        if (motivo) p.conferir.push({ r, nome: escrito, motivo });
+        p.noRdo.push(r);
+        if (p.id !== r.dono) p.viaOutros.push(r);
+      });
     }));
     const entregou = (p) => p.noRdo.length;
     const porNome = (a, b) => a.nome.localeCompare(b.nome, 'pt-BR');
@@ -606,6 +607,9 @@ window.Mestre = (() => {
       + (!fez && p.preenchidos.length ? `${p.funcao || p.email ? ' · ' : ''}enviou RDO, mas o nome não está na Mão de Obra`
         : !fez && p.rdos.length ? `${p.funcao || p.email ? ' · ' : ''}só RDO em branco no dia` : '')
       + (!fez && p.parecidos?.length ? `<br><strong>Nome parecido</strong> ${p.parecidos.map((x) => `no RDO de ${esc(x.r.nome || x.r.email || 'outra pessoa')}: "${esc(x.nome)}"`).join('; ')} — confira`
+        : '')
+      + (fez && p.conferir?.length && p.conferir.length === p.noRdo.length
+        ? `<br><strong>Conferir</strong> ${p.conferir.map((x) => `no RDO de ${esc(x.r.nome || x.r.email || 'outra pessoa')} está "${esc(x.nome)}" (${x.motivo})`).join('; ')}`
         : '')
       + (fez && p.viaOutros?.length ? `${p.funcao || p.email ? ' · ' : ''}está no RDO de ${p.viaOutros.map((r) => esc(r.nome || r.email || 'outra pessoa')).join(', ')}` : '');
     const rdosVistos = [...p.rdos, ...(p.viaOutros || []).filter((r) => !p.rdos.includes(r))];
@@ -653,7 +657,7 @@ window.Mestre = (() => {
         <button class="btn ghost" data-act="ctl-atualizar" style="font-size:12.5px">Atualizar</button>
         <div class="section-label">${fmtDate(diaCtl)}</div>
         ${corpo}
-        <p class="dica">Verde: o nome da pessoa está na Mão de Obra (sem Falta) de algum RDO preenchido nesse dia, o dela ou o de outra pessoa. Vermelho: o nome não está em nenhum RDO do dia, mesmo que ela tenha enviado o próprio RDO. RDO feito sem internet só conta depois que subir.</p>`,
+        <p class="dica">Verde: o nome da pessoa (completo ou só uma parte) está na Mão de Obra, sem Falta, de algum RDO preenchido nesse dia, o dela ou o de outra pessoa. "Conferir" aparece quando o nome do RDO é só uma parte, tem grafia diferente ou serve para mais de uma conta. Vermelho: o nome não está em nenhum RDO do dia. RDO feito sem internet só conta depois que subir.</p>`,
       bind(root) {
         root.querySelector('#ctl-dia')?.addEventListener('change', (e) => {
           if (!e.target.value) return;

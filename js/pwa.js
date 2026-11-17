@@ -166,6 +166,9 @@ window.Pwa = (() => {
    * início ou no APK). Ao publicar uma versão com novidade, acrescente uma linha aqui.
    */
   const NOVIDADES = {
+    v43: [
+      'Controle de RDO: qualquer parte do nome na Mão de Obra (primeiro, segundo ou terceiro nome) conta como feito. Quando o nome é só uma parte, tem grafia diferente ou serve para mais de uma conta, o cartão verde mostra "Conferir" com o nome como está no RDO.',
+    ],
     v42: [
       'Controle de RDO: nome só com o primeiro nome na Mão de Obra conta como feito quando só uma conta tem esse nome; grafia diferente (Thiago/Tiago, Luiz/Luis, Rossi/Rosi) também conta. Quem ficar vermelho mostra o nome parecido achado no RDO para conferir.',
     ],
