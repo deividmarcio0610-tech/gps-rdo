@@ -1086,3 +1086,15 @@ body.campo .ver-senha { font-size: 15px; }
 .bi-rolar { overflow-x: auto; }
 .bi-cval { font-size: 11px; font-weight: 700; text-anchor: middle; fill: currentColor; }
 .bi-cdia { font-size: 10px; text-anchor: middle; fill: #777; }
+
+/* ---- Galeria de fotos (conta principal) ---- */
+.gal-resumo { background: var(--surface); border-left: 5px solid var(--orange); border-radius: var(--radius); box-shadow: var(--shadow); padding: 8px 12px; font-size: 13px; margin: 10px 0; }
+.gal-grupo { background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); padding: 10px; margin: 8px 0; }
+.gal-titulo { font-weight: 800; font-size: 13px; text-transform: uppercase; padding-bottom: 6px; margin-bottom: 8px; border-bottom: 2px solid var(--orange); display: flex; justify-content: space-between; gap: 8px; }
+.gal-titulo span { background: var(--orange); color: #fff; border-radius: 10px; padding: 0 8px; font-size: 12px; }
+.gal-foto .cap small { color: var(--text-soft); font-weight: 400; }
+.gal-foto img:not([src]) { background: var(--surface-2); min-height: 90px; }
+.gal-foto.gal-sem img { opacity: .3; }
+.gal-salvar { background: rgba(0,0,0,.55) !important; }
+.bi-resumo ul { margin: 6px 0 0; padding-left: 18px; }
+.bi-resumo li { margin: 2px 0; }

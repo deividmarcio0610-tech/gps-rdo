@@ -558,29 +558,27 @@ window.Mestre = (() => {
       if (conhecidos.has(dono)) return;
       pessoas.push(comRdos({ id: dono, nome: rdos[0].nome || rdos[0].email || 'sem nome', email: rdos[0].email || '', funcao: '' }, rdos));
     });
-    // Pedido de 17/11/2026: quem está na Mão de Obra do RDO de outra pessoa (sem Falta) também
-    // conta como entregue — o RDO saiu em nome de um e cobre a equipe toda.
-    // Regras (um verde errado esconde quem não entregou, então na dúvida fica vermelho):
-    //  - só entram os RDOs do dia escolhido (ctl.rdos já vem filtrado pelo dia) e preenchidos,
-    //    o mesmo critério do verde de quem enviou o próprio RDO;
-    //  - quem tem RDO próprio preenchido mostra o próprio, nunca "está no RDO de outra pessoa";
-    //  - linha com Falta não conta; quem tem Falta num RDO e está presente em outro do mesmo
-    //    dia conta como entregue pelo RDO em que está presente;
+    // Pedido de 17/11/2026 (v40): só fica verde quem tem o nome na Mão de Obra (sem Falta) de
+    // algum RDO preenchido do dia — o próprio ou o de outra pessoa. Enviar o RDO sem pôr o
+    // próprio nome na Mão de Obra deixa vermelho. Na dúvida fica vermelho:
+    //  - só entram os RDOs do dia escolhido (ctl.rdos já vem filtrado pelo dia) e preenchidos;
+    //  - linha com Falta não conta; Falta num RDO e presente em outro conta pelo outro;
     //  - nome que serve para mais de uma conta ("Tiago Souza" com "Tiago Souza Silva" e
     //    "Tiago Souza Lima") não marca ninguém, a não ser que seja idêntico ao de uma só conta.
     const preenchidosDoDia = ctl.rdos.filter((r) => temConteudo(r.json));
     const igual = (a, b) => palavrasNome(a).join(' ') === palavrasNome(b).join(' ');
-    pessoas.forEach((p) => { p.viaOutros = []; });
+    pessoas.forEach((p) => { p.noRdo = []; p.viaOutros = []; });
     preenchidosDoDia.forEach((r) => (r.json.workforce || []).forEach((w) => {
       if (!w || w.status === 'Falta' || !String(w.name || '').trim()) return;
       const iguais = pessoas.filter((p) => igual(w.name, p.nome));
       const candidatos = iguais.length ? iguais : pessoas.filter((p) => mesmoNome(w.name, p.nome));
       if (candidatos.length !== 1) return; // ninguém, ou ambíguo
       const p = candidatos[0];
-      if (p.id === r.dono || p.preenchidos.length || p.viaOutros.includes(r)) return;
-      p.viaOutros.push(r);
+      if (p.noRdo.includes(r)) return;
+      p.noRdo.push(r);
+      if (p.id !== r.dono) p.viaOutros.push(r);
     }));
-    const entregou = (p) => p.preenchidos.length || p.viaOutros.length;
+    const entregou = (p) => p.noRdo.length;
     const porNome = (a, b) => a.nome.localeCompare(b.nome, 'pt-BR');
     return {
       fez: pessoas.filter(entregou).sort(porNome),
@@ -590,9 +588,10 @@ window.Mestre = (() => {
 
   function pessoaHtml(p, fez) {
     const sub = [p.funcao, p.email].filter(Boolean).map(esc).join(' · ')
-      + (!fez && p.rdos.length ? `${p.funcao || p.email ? ' · ' : ''}só RDO em branco no dia` : '')
+      + (!fez && p.preenchidos.length ? `${p.funcao || p.email ? ' · ' : ''}enviou RDO, mas o nome não está na Mão de Obra`
+        : !fez && p.rdos.length ? `${p.funcao || p.email ? ' · ' : ''}só RDO em branco no dia` : '')
       + (fez && p.viaOutros?.length ? `${p.funcao || p.email ? ' · ' : ''}está no RDO de ${p.viaOutros.map((r) => esc(r.nome || r.email || 'outra pessoa')).join(', ')}` : '');
-    const rdosVistos = p.preenchidos.length ? p.rdos : [...p.rdos, ...(p.viaOutros || [])];
+    const rdosVistos = [...p.rdos, ...(p.viaOutros || []).filter((r) => !p.rdos.includes(r))];
     const rdos = rdosVistos.map((r) => `
       <button class="btn ghost" data-abrir-ctl="${esc(r.docId)}" style="padding:4px 10px;font-size:12px">
         RDO ${esc(r.json.number)}${r.json.status === 'final' ? ' · finalizado' : ''}</button>`).join('');
@@ -637,7 +636,7 @@ window.Mestre = (() => {
         <button class="btn ghost" data-act="ctl-atualizar" style="font-size:12.5px">Atualizar</button>
         <div class="section-label">${fmtDate(diaCtl)}</div>
         ${corpo}
-        <p class="dica">Verde: a pessoa tem RDO preenchido com a data escolhida no banco, ou está na Mão de Obra (sem Falta) do RDO de outra pessoa nesse dia. Vermelho: não tem, ou só tem RDO em branco. RDO feito sem internet só conta depois que subir.</p>`,
+        <p class="dica">Verde: o nome da pessoa está na Mão de Obra (sem Falta) de algum RDO preenchido nesse dia, o dela ou o de outra pessoa. Vermelho: o nome não está em nenhum RDO do dia, mesmo que ela tenha enviado o próprio RDO. RDO feito sem internet só conta depois que subir.</p>`,
       bind(root) {
         root.querySelector('#ctl-dia')?.addEventListener('change', (e) => {
           if (!e.target.value) return;

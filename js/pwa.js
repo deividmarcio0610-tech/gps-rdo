@@ -166,6 +166,11 @@ window.Pwa = (() => {
    * início ou no APK). Ao publicar uma versão com novidade, acrescente uma linha aqui.
    */
   const NOVIDADES = {
+    v40: [
+      'Controle de RDO: só fica verde quem tem o nome na Mão de Obra (sem Falta) de algum RDO do dia, o próprio ou o de outra pessoa.',
+      'Análise: resumo em tópicos curtos, destaques (atividade mais rotineira, preventiva x corretiva, equipamento mais atendido, mão de obra do dia) e PDF do resumo.',
+      'Fotos: ao anexar, escolha a atividade. A conta principal tem a Galeria de fotos, por dia e atividade, com botão para salvar no telefone.',
+    ],
     v39: [
       'Controle de RDO: nome da Mão de Obra que serve para mais de uma conta não marca ninguém como entregue; Falta num RDO e presença em outro do mesmo dia conta pelo RDO em que a pessoa está presente.',
     ],

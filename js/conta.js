@@ -195,6 +195,7 @@ window.Conta = (() => {
     // lista e PDF que a conta principal deixou montados não ficam para a conta seguinte
     window.Mestre?.limpar?.();
     window.Analise?.limpar?.();
+    window.Galeria?.limpar?.();
     return id;
   }
 
@@ -1355,6 +1356,7 @@ window.Conta = (() => {
             Store.usarConta('');
             window.Mestre?.limpar?.();
             window.Analise?.limpar?.();
+    window.Galeria?.limpar?.();
             redesenhar();
           }
           return;

@@ -53,6 +53,7 @@ window.Analise = (() => {
     const ocorrencias = [];
     const pessoas = new Map();
     const dias = new Map();
+    const maoDeObra = [];
 
     for (const x of ordenada) {
       const r = x.json;
@@ -62,6 +63,10 @@ window.Analise = (() => {
       const eqs = (r.equipmentList || []).map((e) => ({ ...base, equipamento: e.name || '', status: e.status || 'Sem status', horimetroIni: e.hoursStart ?? '', horimetroFim: e.hoursEnd ?? '' }));
       const ps = (r.stoppages || []).map((p) => ({ ...base, inicio: p.start || '', fim: p.end || '', motivo: p.reason || 'Sem motivo', obs: p.note || '', minutos: Store.minutosParada(p) }));
       const ocs = (r.occurrences || []).map((o) => ({ ...base, tipo: o.type || 'Sem tipo', descricao: o.description || '', hora: o.time || '' }));
+      (r.workforce || []).forEach((w) => {
+        if (!w || !String(w.name || '').trim() || w.status === 'Falta') return;
+        maoDeObra.push({ ...base, nome: String(w.name).trim(), funcao: String(w.role || '').trim(), equipe: String(w.team || '').trim(), horas: w.hours || '' });
+      });
       tarefas.push(...ts);
       equipamentos.push(...eqs);
       paradas.push(...ps);
@@ -105,7 +110,41 @@ window.Analise = (() => {
     const minutosPorMotivo = new Map();
     paradas.forEach((p) => minutosPorMotivo.set(p.motivo, (minutosPorMotivo.get(p.motivo) || 0) + p.minutos));
 
+    // ---- destaques (pedido de 17/11/2026, no estilo do painel do LubControl)
+    const contarTexto = (itens, pegar) => {
+      const m = new Map();
+      itens.forEach((i) => {
+        const bruto = String(pegar(i) || '').trim().replace(/\s+/g, ' ');
+        if (!bruto) return;
+        const k = bruto.toLowerCase();
+        const atual = m.get(k) || [bruto, 0];
+        atual[1] += 1;
+        m.set(k, atual);
+      });
+      return [...m.values()].sort((a, b) => b[1] - a[1]);
+    };
+    // atividade: cada lançamento de tarefa conta (é o que se repete no dia a dia)
+    const atividades = contarTexto(tarefas, (t) => t.descricao);
+    // preventiva x corretiva pelo tipo de cada lançamento de tarefa
+    const tipoDe = (t) => {
+      const x = String(t.tipo || '').toLowerCase();
+      if (x.includes('prevent')) return 'Preventiva';
+      if (x.includes('corret')) return 'Corretiva';
+      if (x.includes('predit')) return 'Preditiva';
+      return x ? 'Outras' : 'Sem tipo';
+    };
+    const prevCorr = contarTexto(tarefas, tipoDe);
+    // equipamento mais atendido: TAG da tarefa; sem TAG, o equipamento da lista do RDO
+    const alvos = contarTexto([...tarefas.map((t) => t.tag), ...equipamentos.map((e) => e.equipamento)], (x) => x);
+    // mão de obra presente no dia mais recente do período
+    const diaMaoDeObra = maoDeObra.reduce((m, w) => (w.data > m ? w.data : m), '');
+    const maoDoDia = maoDeObra.filter((w) => w.data === diaMaoDeObra);
+    const maoPorLocal = contarTexto(maoDoDia, (w) => w.local || 'Sem local');
+    const maoPorEquipe = contarTexto(maoDoDia, (w) => w.equipe || 'Sem equipe');
+    const maoPorFuncao = contarTexto(maoDoDia, (w) => w.funcao || 'Sem função');
+
     return {
+      atividades, prevCorr, alvos, maoDeObra, diaMaoDeObra, maoDoDia, maoPorLocal, maoPorEquipe, maoPorFuncao,
       rdos, tarefas, equipamentos, paradas, ocorrencias,
       pessoas: [...pessoas.values()].sort((a, b) => b.rdos - a.rdos || a.pessoa.localeCompare(b.pessoa)),
       dias: [...dias.entries()].sort((a, b) => a[0].localeCompare(b[0])),
@@ -201,6 +240,85 @@ window.Analise = (() => {
       </svg></div></div>`;
   }
 
+  /** O resumo em tópicos curtos: o mesmo texto vai para a tela e para o PDF. */
+  function topicos(a) {
+    const h = Store.fmtHoras;
+    const t = [
+      { texto: `${a.rdos.length} RDO(s) · ${a.pessoas.length} pessoa(s) · ${a.dias.length} dia(s)` },
+      { texto: `Tarefas: ${a.executadas.length} exec. · ${a.emAndamento.length} andam. · ${a.naoIniciadas.length} não inic.` },
+      { texto: `Exec. média: ${a.mediaExecucao}%` },
+      a.equipParados.length
+        ? { texto: `Equip. parados: ${a.equipParados.length} (${a.equipParados.slice(0, 3).map((e) => e.equipamento).join(', ')}${a.equipParados.length > 3 ? '…' : ''})`, critico: true }
+        : { texto: 'Equip. parados: nenhum' },
+      { texto: `H. paradas: ${h(a.minParados)}${a.minutosPorMotivo[0] ? ` · maior motivo: ${a.minutosPorMotivo[0][0]} (${h(a.minutosPorMotivo[0][1])})` : ''}` },
+    ];
+    if (a.atividades[0]) t.push({ texto: `Ativ. + rotineira: ${a.atividades[0][0]} (${a.atividades[0][1]}x)` });
+    const totalTipos = a.prevCorr.reduce((x, [, v]) => x + v, 0);
+    if (totalTipos) t.push({ texto: `Tipo: ${a.prevCorr.slice(0, 3).map(([k, v]) => `${k} ${Math.round(v / totalTipos * 100)}%`).join(' · ')}` });
+    if (a.alvos[0]) t.push({ texto: `Equip. + atendido: ${a.alvos[0][0]} (${a.alvos[0][1]}x)` });
+    if (a.maoDoDia.length) {
+      t.push({ texto: `Mão de obra ${fmtDate(a.diaMaoDeObra).slice(0, 5)}: ${a.maoDoDia.length} pres. · + em ${a.maoPorLocal[0][0]} (${a.maoPorLocal[0][1]})` });
+    }
+    if (a.ocorrencias.length) t.push({ texto: `Ocorrências: ${a.ocorrencias.length}${a.ocorrenciasPorTipo[0] ? ` · + comum: ${a.ocorrenciasPorTipo[0][0]}` : ''}` });
+    if (a.pessoas[0]) t.push({ texto: `Mais RDOs: ${a.pessoas[0].pessoa} (${a.pessoas[0].rdos})` });
+    return t;
+  }
+
+  /** PDF A4 só com o resumo: tópicos, números e as listas que pedem atenção (curtas). */
+  function pdfResumo(a) {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
+    const h = Store.fmtHoras;
+    const laranja = [232, 105, 58];
+    const larg = doc.internal.pageSize.getWidth();
+    doc.setFillColor(...laranja); doc.rect(0, 0, larg, 18, 'F');
+    doc.setTextColor(255); doc.setFont('helvetica', 'bold'); doc.setFontSize(14);
+    doc.text('Análise dos RDOs - resumo', 12, 11.5);
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal');
+    doc.text(`${fmtDate(de)} a ${fmtDate(ate)}`, larg - 12, 11.5, { align: 'right' });
+    doc.setTextColor(30);
+    let y = 26;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.text('Resumo', 12, y); y += 6;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+    topicos(a).forEach((t) => {
+      const linhas = doc.splitTextToSize(`•  ${t.texto}`, larg - 24);
+      doc.setTextColor(...(t.critico ? [200, 40, 40] : [30, 30, 30]));
+      doc.text(linhas, 12, y); y += linhas.length * 5;
+    });
+    doc.setTextColor(30);
+    const tab = (titulo, cabeca, linhas, max = 10) => {
+      if (!linhas.length) return;
+      const corte = linhas.slice(0, max);
+      doc.autoTable({
+        startY: y + 4, head: [[{ content: titulo + (linhas.length > max ? ` (${max} de ${linhas.length})` : ''), colSpan: cabeca.length }], cabeca],
+        body: corte, theme: 'grid', margin: { left: 12, right: 12 },
+        styles: { fontSize: 8.5, cellPadding: 1.6, overflow: 'ellipsize' },
+        headStyles: { fillColor: laranja, textColor: 255, fontStyle: 'bold' },
+      });
+      y = doc.lastAutoTable.finalY;
+    };
+    tab('Números', ['RDOs', 'Pessoas', 'Exec.', 'Andam.', 'Não inic.', 'Exec. méd.', 'Eq. par.', 'Manut.', 'H. par.', 'Ocorr.'],
+      [[a.rdos.length, a.pessoas.length, a.executadas.length, a.emAndamento.length, a.naoIniciadas.length, `${a.mediaExecucao}%`,
+        a.equipParados.length, a.equipManutencao.length, h(a.minParados), a.ocorrencias.length]]);
+    tab('Ativ. mais rotineiras', ['Atividade', 'Vezes'], a.atividades.map(([k, v]) => [k, v]), 8);
+    tab('Preventiva x corretiva', ['Tipo', 'Lançam.', '%'], a.prevCorr.map(([k, v]) => [k, v, `${Math.round(v / Math.max(1, a.tarefas.length) * 100)}%`]));
+    tab('Equip./TAG mais atendidos', ['Equip./TAG', 'Vezes'], a.alvos.map(([k, v]) => [k, v]), 8);
+    if (a.maoDoDia.length) tab(`Mão de obra ${fmtDate(a.diaMaoDeObra)} por local`, ['Local', 'Pessoas'], a.maoPorLocal.map(([k, v]) => [k, v]), 8);
+    tab('Por pessoa', ['Pessoa', 'RDOs', 'Tar.', 'Exec.', 'Andam.', 'H. par.', 'Últ. RDO'],
+      a.pessoas.map((p) => [p.pessoa, p.rdos, p.tarefas, p.executadas, p.emAndamento, h(p.minParados), fmtDate(p.ultimo)]), 15);
+    tab('Equip. parados/manut.', ['Equip.', 'Status', 'Data', 'Quem'],
+      [...a.equipParados, ...a.equipManutencao].map((e) => [e.equipamento, e.status, fmtDate(e.data), e.pessoa]));
+    tab('H. paradas por motivo', ['Motivo', 'Horas'], a.minutosPorMotivo.map(([m, v]) => [m, h(v)]), 8);
+    tab('Em andamento (menor %)', ['OS', 'TAG', 'Desc.', '%', 'Quem'],
+      a.emAndamento.slice().sort((x, z) => x.execucao - z.execucao).map((t) => [t.os, t.tag, t.descricao, `${t.execucao}%`, t.pessoa]));
+    const paginas = doc.getNumberOfPages();
+    for (let i = 1; i <= paginas; i += 1) {
+      doc.setPage(i); doc.setFontSize(7.5); doc.setTextColor(130);
+      doc.text(`GPS-RDO · gerado em ${new Date().toLocaleString('pt-BR')} · pág. ${i}/${paginas}`, 12, doc.internal.pageSize.getHeight() - 6);
+    }
+    return doc.output('blob');
+  }
+
   const barras = (pares, formatar = (v) => v) => {
     const max = Math.max(1, ...pares.map(([, v]) => v));
     return pares.length ? `<div class="bi-barras">${pares.map(([k, v]) => `
@@ -225,46 +343,56 @@ window.Analise = (() => {
       const h = Store.fmtHoras;
       corpo = `
         ${cache.doServidor ? '' : '<div class="aviso">Sem internet: números da última cópia guardada no aparelho.</div>'}
-        <div class="bi-resumo"><strong>RESUMO DO PERÍODO</strong> · <strong>${a.rdos.length}</strong> RDO(s) de
-          <strong>${a.pessoas.length}</strong> pessoa(s) em ${a.dias.length} dia(s) · Tarefas: <strong>${a.executadas.length}</strong> executadas,
-          <strong>${a.emAndamento.length}</strong> em andamento, ${a.naoIniciadas.length} não iniciadas (execução média ${a.mediaExecucao}%) ·
-          ${a.equipParados.length ? `<span class="bi-critico">${a.equipParados.length} equipamento(s) parado(s)</span>` : 'nenhum equipamento parado'} ·
-          Horas paradas: <strong>${h(a.minParados)}</strong>${a.pessoas[0] ? ` · Mais RDOs: <strong>${esc(a.pessoas[0].pessoa)}</strong> (${a.pessoas[0].rdos})` : ''}</div>
+        <div class="bi-resumo"><strong>RESUMO</strong>
+          <ul>${topicos(a).map((t) => `<li${t.critico ? ' class="bi-critico"' : ''}>${esc(t.texto)}</li>`).join('')}</ul></div>
         <div class="bi-grade">
-          ${cartao('RDOs', a.rdos.length, '', `${a.finalizados} finalizados`)}
-          ${cartao('Pessoas que enviaram', a.pessoas.length)}
-          ${cartao('Tarefas executadas', a.executadas.length, 'green', '100% feitas')}
-          ${cartao('Em andamento', a.emAndamento.length, 'amber', 'entre 1% e 99%')}
-          ${cartao('Não iniciadas', a.naoIniciadas.length, 'red', '0%')}
-          ${cartao('Execução média', `${a.mediaExecucao}%`)}
-          ${cartao('Equipamentos parados', a.equipParados.length, 'red', 'último status no período')}
-          ${cartao('Em manutenção', a.equipManutencao.length, 'amber')}
+          ${cartao('RDOs', a.rdos.length, '', `${a.finalizados} final.`)}
+          ${cartao('Pessoas', a.pessoas.length)}
+          ${cartao('Executadas', a.executadas.length, 'green', '100%')}
+          ${cartao('Em andam.', a.emAndamento.length, 'amber', '1–99%')}
+          ${cartao('Não inic.', a.naoIniciadas.length, 'red', '0%')}
+          ${cartao('Exec. média', `${a.mediaExecucao}%`)}
+          ${cartao('Equip. parados', a.equipParados.length, 'red', 'últ. status')}
+          ${cartao('Em manut.', a.equipManutencao.length, 'amber')}
           ${cartao('Operando', a.equipOperando.length, 'green')}
-          ${cartao('Horas paradas', h(a.minParados), 'red', `${a.paradas.length} parada(s)`)}
+          ${cartao('H. paradas', h(a.minParados), 'red', `${a.paradas.length} parada(s)`)}
           ${cartao('Ocorrências', a.ocorrencias.length)}
-          ${cartao('Dias com RDO', a.dias.length)}
+          ${cartao('Dias c/ RDO', a.dias.length)}
         </div>
-        <button class="btn primary block" data-act="exportar">${icon('download', 16)}Exportar para Excel</button>
+        <div class="btn-row">
+          <button class="btn primary" data-act="exportar-pdf">${icon('download', 16)}PDF (resumo)</button>
+          <button class="btn ghost" data-act="exportar">${icon('download', 16)}Excel (completo)</button>
+        </div>
 
+        <div class="section-label">Destaques</div>
+        ${barrasH('Ativ. mais rotineiras', a.atividades.slice(0, 8))}
+        ${rosca('Preventiva x corretiva', a.prevCorr, 'lançam.', ['#1f9d74', '#d64541', '#2f7bd6', '#9a9a9a', '#c9c9c9'])}
+        ${barrasH('Equip./TAG mais atendidos', a.alvos.slice(0, 8))}
+        ${a.maoDoDia.length ? `
+        ${barrasH(`Mão de obra ${fmtDate(a.diaMaoDeObra)} · por local`, a.maoPorLocal.slice(0, 8))}
+        ${a.maoPorEquipe.some(([k]) => k !== 'Sem equipe') ? barrasH(`Mão de obra ${fmtDate(a.diaMaoDeObra).slice(0, 5)} · por equipe`, a.maoPorEquipe.slice(0, 8)) : ''}
+        ${barrasH(`Mão de obra ${fmtDate(a.diaMaoDeObra).slice(0, 5)} · por função`, a.maoPorFuncao.slice(0, 8))}` : vazio('Mão de obra do dia')}
+
+        <div class="section-label">Gráficos</div>
         ${colunasDia('RDOs por dia', a.dias.map(([d, n]) => [fmtDate(d).slice(0, 5), n]), 'RDOs')}
-        ${rosca('Situação das tarefas', [['Executadas (100%)', a.executadas.length], ['Em andamento', a.emAndamento.length], ['Não iniciadas (0%)', a.naoIniciadas.length]], 'tarefas', ['#1f9d74', '#e0a419', '#d64541'])}
-        ${rosca('Equipamentos (último status)', [['Operando', a.equipOperando.length], ['Manutenção', a.equipManutencao.length], ['Parado', a.equipParados.length], ['Sem status', a.equipAtual.length - a.equipOperando.length - a.equipManutencao.length - a.equipParados.length]], 'equipamentos', ['#1f9d74', '#e0a419', '#d64541', '#9a9a9a'])}
-        ${rosca('Tipo de manutenção', a.porTipo.map(([k, v]) => [k || '(não informado)', v]), 'tarefas')}
-        ${barrasH('Horas paradas por motivo', a.minutosPorMotivo, h)}
+        ${rosca('Tarefas', [['Executadas', a.executadas.length], ['Em andam.', a.emAndamento.length], ['Não inic.', a.naoIniciadas.length]], 'tarefas', ['#1f9d74', '#e0a419', '#d64541'])}
+        ${rosca('Equipamentos', [['Operando', a.equipOperando.length], ['Manut.', a.equipManutencao.length], ['Parado', a.equipParados.length], ['S/ status', a.equipAtual.length - a.equipOperando.length - a.equipManutencao.length - a.equipParados.length]], 'equipamentos', ['#1f9d74', '#e0a419', '#d64541', '#9a9a9a'])}
+        ${rosca('Tipo de manut.', a.porTipo.map(([k, v]) => [k || '(não inf.)', v]), 'tarefas')}
+        ${barrasH('H. paradas por motivo', a.minutosPorMotivo, h)}
         ${barrasH('RDOs por pessoa', a.pessoas.map((p) => [p.pessoa, p.rdos]))}
         ${barrasH('Ocorrências por tipo', a.ocorrenciasPorTipo)}
 
         <div class="section-label">Por pessoa</div>
-        ${tabela(['Pessoa', 'RDOs', 'Tarefas', 'Executadas', 'Em andamento', 'Horas paradas', 'Último RDO'],
+        ${tabela(['Pessoa', 'RDOs', 'Tar.', 'Exec.', 'Andam.', 'H. par.', 'Últ. RDO'],
           a.pessoas.map((p) => [p.pessoa, p.rdos, p.tarefas, p.executadas, p.emAndamento, h(p.minParados), fmtDate(p.ultimo)]))}
-        <div class="section-label">Equipamentos parados ou em manutenção · ${a.equipParados.length + a.equipManutencao.length}</div>
-        ${tabela(['Equipamento', 'Status', 'Data', 'RDO', 'Quem'],
+        <div class="section-label">Equip. parados/manut. · ${a.equipParados.length + a.equipManutencao.length}</div>
+        ${tabela(['Equip.', 'Status', 'Data', 'RDO', 'Quem'],
           [...a.equipParados, ...a.equipManutencao].map((e) => [e.equipamento, e.status, fmtDate(e.data), e.rdo, e.pessoa]))}
-        <div class="section-label">Tarefas em andamento · ${a.emAndamento.length}</div>
-        ${tabela(['OS', 'TAG', 'Descrição', '%', 'Data', 'Quem'],
+        <div class="section-label">Em andamento · ${a.emAndamento.length}</div>
+        ${tabela(['OS', 'TAG', 'Desc.', '%', 'Data', 'Quem'],
           a.emAndamento.sort((x, y) => x.execucao - y.execucao).map((t) => [t.os, t.tag, t.descricao, `${t.execucao}%`, fmtDate(t.data), t.pessoa]))}
-        <div class="section-label">Tarefas executadas · ${a.executadas.length}</div>
-        ${tabela(['OS', 'TAG', 'Descrição', 'Data', 'Quem'],
+        <div class="section-label">Executadas · ${a.executadas.length}</div>
+        ${tabela(['OS', 'TAG', 'Desc.', 'Data', 'Quem'],
           a.executadas.map((t) => [t.os, t.tag, t.descricao, fmtDate(t.data), t.pessoa]))}`;
     }
     return {
@@ -282,7 +410,7 @@ window.Analise = (() => {
           <button class="btn ghost" data-act="bi-atualizar">${icon('refresh', 14)}Atualizar</button>
         </div>
         ${corpo}
-        <p class="dica">Levantamento de todos os RDOs da equipe que estão no banco no período. Tarefa que passa de um RDO para o outro conta uma vez, pelo último lançamento; equipamento também, pelo último status. RDO feito sem internet só entra depois que sobe.</p>`,
+        <p class="dica">Todos os RDOs do banco no período. Tarefa e equipamento contam uma vez (último lançamento). RDO sem internet entra depois que sobe.</p>`,
       bind(root) {
         const mudar = (novoDe, novoAte) => { de = novoDe; ate = novoAte; app.render(); };
         root.querySelector('#bi-de')?.addEventListener('change', (e) => { if (e.target.value) mudar(e.target.value, ate < e.target.value ? e.target.value : ate); });
@@ -298,6 +426,18 @@ window.Analise = (() => {
           else mudar('2020-01-01', hoje);
         }));
         root.querySelector('[data-act="bi-atualizar"]')?.addEventListener('click', () => { cache = { ...cache, chave: '' }; app.render(); });
+        root.querySelector('[data-act="exportar-pdf"]')?.addEventListener('click', async (ev) => {
+          const botao = ev.currentTarget;
+          botao.disabled = true;
+          try {
+            const nome = `Resumo RDO - ${fmtDate(de).replace(/\//g, '-')} a ${fmtDate(ate).replace(/\//g, '-')}.pdf`;
+            const r = await UI.entregarArquivo(pdfResumo(levantar(cache.lista)), nome, 'Salvar ou enviar o PDF');
+            if (r === 'baixado') toast('PDF baixado.');
+          } catch (e) {
+            toast(`Não foi possível gerar o PDF: ${e.message || e}`);
+          }
+          botao.disabled = false;
+        });
         root.querySelector('[data-act="exportar"]')?.addEventListener('click', async (ev) => {
           const botao = ev.currentTarget;
           botao.disabled = true;
@@ -361,5 +501,5 @@ ${aba('Ocorrências', ['Data', 'Nº RDO', 'Pessoa', 'Hora', 'Tipo', 'Descrição
   function limpar() { cache = { chave: '', lista: [], doServidor: true }; erro = ''; }
   function aoEntrar() { if (!carregando) cache = { ...cache, chave: '' }; }
 
-  return { tela, limpar, aoEntrar, levantar, planilha };
+  return { tela, limpar, aoEntrar, levantar, planilha, topicos, pdfResumo };
 })();

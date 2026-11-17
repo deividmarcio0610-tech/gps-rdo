@@ -37,6 +37,7 @@ window.Screens = (() => {
     equipe: 'RDOs da Equipe',
     controle: 'Controle de RDO',
     analise: 'Análise dos RDOs',
+    galeria: 'Galeria de fotos',
     sair: 'Sair da conta',
   };
 
@@ -182,6 +183,7 @@ window.Screens = (() => {
           ${window.Conta?.ehMestre?.() ? `<button class="action-card" data-act="controle-aba">${icon('clipboard')}Controle de RDO</button>` : ''}
           ${window.Conta?.ehMestre?.() ? `<button class="action-card wide" data-go="equipe">${icon('users', 20)}RDOs da Equipe</button>` : ''}
           ${window.Conta?.ehMestre?.() ? `<button class="action-card wide" data-go="analise">${icon('chart', 20)}Análise dos RDOs (números e Excel)</button>` : ''}
+          ${window.Conta?.ehMestre?.() ? `<button class="action-card wide" data-go="galeria">${icon('image', 20)}Galeria de fotos (por dia e atividade)</button>` : ''}
           <button class="action-card wide neutro-card" data-act="atualizar-app">${icon('refresh', 20)}Atualizar o app<span class="sub-card" data-versao-app></span></button>
           <button class="action-card wide neutro-card" data-go="backup">${icon('shield', 20)}Cópia de Segurança</button>
           <button class="action-card wide neutro-card" data-go="conta">${icon('lock', 20)}Minha Conta</button>
@@ -1012,7 +1014,7 @@ window.Screens = (() => {
                 <img data-foto="${i}" alt="${esc(p.desc || 'Foto do RDO')}">
                 ${p.latitude != null ? `<span class="gps">${icon('gps', 9)} GPS</span>` : ''}
                 ${travado(rdo) ? '' : `<button class="rm" data-del="${i}" aria-label="Remover foto">${icon('trash', 13)}</button>`}
-                <figcaption class="cap">${esc(p.desc || fmtDate(p.date) + ' ' + (p.time || ''))}</figcaption>
+                <figcaption class="cap">${esc([p.atividade?.descricao, p.desc].filter(Boolean).join(' · ') || fmtDate(p.date) + ' ' + (p.time || ''))}</figcaption>
               </figure>`).join('')}</div>`}`,
       bind(root) {
         // miniaturas: a imagem vem do IndexedDB depois de desenhar a tela
@@ -1033,10 +1035,20 @@ window.Screens = (() => {
           if (!arquivos.length) return;
           const desc = await sheet({
             title: arquivos.length > 1 ? `Descrição das ${arquivos.length} fotos` : 'Descrição da foto',
-            fields: [{ key: 'desc', label: 'Descrição (opcional)', placeholder: 'O que a foto mostra' }],
+            fields: [
+              // pedido de 17/11/2026: a foto fica ligada à atividade (tarefa do RDO), para a
+              // galeria da conta principal juntar as fotos por atividade
+              ...(rdo.tasks.length ? [{ key: 'atividade', label: 'Atividade', type: 'select',
+                options: [{ value: '', label: 'Geral (sem atividade)' }, ...rdo.tasks.map((t, i) => ({ value: String(i),
+                  label: [t.os && `OS ${t.os}`, t.tag, t.description].filter(Boolean).join(' · ').slice(0, 70) || `Tarefa ${i + 1}` }))],
+                value: rdo.tasks.length === 1 ? '0' : '' }] : []),
+              { key: 'desc', label: 'Descrição (opcional)', placeholder: 'O que a foto mostra' },
+            ],
             submit: 'Anexar',
           });
           if (desc === null) return;
+          const tarefa = desc.atividade !== undefined && desc.atividade !== '' ? rdo.tasks[Number(desc.atividade)] : null;
+          const atividade = tarefa ? { os: tarefa.os || '', tag: tarefa.tag || '', descricao: tarefa.description || '' } : null;
 
           // GPS só para foto tirada agora; a da galeria pode ter sido feita em outro lugar
           let coords = null;
@@ -1058,7 +1070,7 @@ window.Screens = (() => {
             const carimbo = [
               `${fmtDate(isoLocal(quando))} ${doisDigitos(quando.getHours())}:${doisDigitos(quando.getMinutes())} · RDO ${rdo.number}`,
               coords ? `GPS ${coords.latitude.toFixed(6)}, ${coords.longitude.toFixed(6)}` : (daCamera ? 'GPS indisponível' : 'Foto da galeria (sem GPS)'),
-              [rdo.location, desc.desc].filter(Boolean).join(' · '),
+              [rdo.location, atividade?.os && `OS ${atividade.os}`, atividade?.descricao, desc.desc].filter(Boolean).join(' · '),
             ];
             let guardada = null;
             try {
@@ -1071,6 +1083,7 @@ window.Screens = (() => {
               d.photos.push({
                 ...guardada,
                 desc: desc.desc || '',
+                ...(atividade ? { atividade } : {}),
                 timestamp: quando.toISOString(),
                 date: isoLocal(quando),
                 time: `${doisDigitos(quando.getHours())}:${doisDigitos(quando.getMinutes())}`,
@@ -1735,12 +1748,13 @@ window.Screens = (() => {
   const controle = (rdo) => (window.Mestre && window.Conta?.ehMestre?.() ? window.Mestre.controle(app) : home(rdo));
 
   // análise tipo BI de todos os RDOs da equipe (pedido de 17/11/2026), só da conta principal
+  const galeria = (rdo) => (window.Galeria && window.Conta?.ehMestre?.() ? window.Galeria.tela(app) : home(rdo));
   const analise = (rdo) => (window.Analise && window.Conta?.ehMestre?.() ? window.Analise.tela(app) : home(rdo));
 
   // página de sair (pedido de 10/11/2026): confirma e leva para a tela de entrar
   const sair = () => window.Conta.telaSair();
 
-  const mapa = { home, header, etapas, workforce, equipment, tasks, occurrences, stops, photos, report, reports, backup, month, roster, conta, equipe, controle, analise, sair };
+  const mapa = { home, header, etapas, workforce, equipment, tasks, occurrences, stops, photos, report, reports, backup, month, roster, conta, equipe, controle, analise, galeria, sair };
 
   return {
     boot(appRef) { app = appRef; },
@@ -1749,6 +1763,7 @@ window.Screens = (() => {
     aoEntrar(tela) {
       if (tela === 'equipe' || tela === 'controle') window.Mestre?.aoEntrar?.(tela);
       if (tela === 'analise') window.Analise?.aoEntrar?.();
+      if (tela === 'galeria') window.Galeria?.aoEntrar?.();
     },
     TITULOS,
   };
