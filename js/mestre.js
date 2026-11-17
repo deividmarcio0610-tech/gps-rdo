@@ -526,9 +526,12 @@ window.Mestre = (() => {
       .some((k) => String(j[k] || '').trim());
   }
 
-  /** Palavras do nome sem acento, caixa e preposições ("da", "de"...). */
+  // grafia: Thiago/Tiago, Luiz/Luis, Mayara/Maiara, Raphael/Rafael, letra dobrada (Rossi/Rosi)
+  const grafia = (w) => w.replace(/th/g, 't').replace(/ph/g, 'f').replace(/y/g, 'i').replace(/w/g, 'v')
+    .replace(/z$/, 's').replace(/(.)\1+/g, '$1');
+  /** Palavras do nome sem acento, caixa e preposições ("da", "de"...), com a grafia igualada. */
   const palavrasNome = (n) => String(n || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
-    .split(/[^a-z0-9]+/).filter((x) => x && !['da', 'de', 'do', 'das', 'dos', 'e'].includes(x));
+    .split(/[^a-z0-9]+/).filter((x) => x && !['da', 'de', 'do', 'das', 'dos', 'e'].includes(x)).map(grafia);
 
   /**
    * Nome da Mão de Obra é a mesma pessoa da conta? Igual, ou todas as palavras do nome mais
@@ -567,12 +570,24 @@ window.Mestre = (() => {
     //    "Tiago Souza Lima") não marca ninguém, a não ser que seja idêntico ao de uma só conta.
     const preenchidosDoDia = ctl.rdos.filter((r) => temConteudo(r.json));
     const igual = (a, b) => palavrasNome(a).join(' ') === palavrasNome(b).join(' ');
-    pessoas.forEach((p) => { p.noRdo = []; p.viaOutros = []; });
+    pessoas.forEach((p) => { p.noRdo = []; p.viaOutros = []; p.parecidos = []; });
     preenchidosDoDia.forEach((r) => (r.json.workforce || []).forEach((w) => {
       if (!w || w.status === 'Falta' || !String(w.name || '').trim()) return;
       const iguais = pessoas.filter((p) => igual(w.name, p.nome));
-      const candidatos = iguais.length ? iguais : pessoas.filter((p) => mesmoNome(w.name, p.nome));
-      if (candidatos.length !== 1) return; // ninguém, ou ambíguo
+      let candidatos = iguais.length ? iguais : pessoas.filter((p) => mesmoNome(w.name, p.nome));
+      // Pedido de 17/11: quem tem o nome no relatório tem que subir como feito. Mão de Obra só com
+      // o primeiro nome vale quando só uma conta da equipe tem esse primeiro nome.
+      const pw = palavrasNome(w.name);
+      if (!candidatos.length && pw.length) {
+        candidatos = pessoas.filter((p) => palavrasNome(p.nome)[0] === pw[0]
+          && (pw.length === 1 || palavrasNome(p.nome).length === 1));
+      }
+      if (candidatos.length !== 1) {
+        // não marca, mas mostra no vermelho para o supervisor conferir
+        const parecidos = candidatos.length ? candidatos : pessoas.filter((p) => palavrasNome(p.nome)[0] === pw[0]);
+        parecidos.forEach((p) => { if (!p.parecidos.some((x) => x.r === r && x.nome === w.name)) p.parecidos.push({ r, nome: String(w.name).trim() }); });
+        return;
+      }
       const p = candidatos[0];
       if (p.noRdo.includes(r)) return;
       p.noRdo.push(r);
@@ -590,6 +605,8 @@ window.Mestre = (() => {
     const sub = [p.funcao, p.email].filter(Boolean).map(esc).join(' · ')
       + (!fez && p.preenchidos.length ? `${p.funcao || p.email ? ' · ' : ''}enviou RDO, mas o nome não está na Mão de Obra`
         : !fez && p.rdos.length ? `${p.funcao || p.email ? ' · ' : ''}só RDO em branco no dia` : '')
+      + (!fez && p.parecidos?.length ? `<br><strong>Nome parecido</strong> ${p.parecidos.map((x) => `no RDO de ${esc(x.r.nome || x.r.email || 'outra pessoa')}: "${esc(x.nome)}"`).join('; ')} — confira`
+        : '')
       + (fez && p.viaOutros?.length ? `${p.funcao || p.email ? ' · ' : ''}está no RDO de ${p.viaOutros.map((r) => esc(r.nome || r.email || 'outra pessoa')).join(', ')}` : '');
     const rdosVistos = [...p.rdos, ...(p.viaOutros || []).filter((r) => !p.rdos.includes(r))];
     const rdos = rdosVistos.map((r) => `

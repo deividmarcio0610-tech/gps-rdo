@@ -166,6 +166,9 @@ window.Pwa = (() => {
    * início ou no APK). Ao publicar uma versão com novidade, acrescente uma linha aqui.
    */
   const NOVIDADES = {
+    v42: [
+      'Controle de RDO: nome só com o primeiro nome na Mão de Obra conta como feito quando só uma conta tem esse nome; grafia diferente (Thiago/Tiago, Luiz/Luis, Rossi/Rosi) também conta. Quem ficar vermelho mostra o nome parecido achado no RDO para conferir.',
+    ],
     v40: [
       'Controle de RDO: só fica verde quem tem o nome na Mão de Obra (sem Falta) de algum RDO do dia, o próprio ou o de outra pessoa.',
       'Análise: resumo em tópicos curtos, destaques (atividade mais rotineira, preventiva x corretiva, equipamento mais atendido, mão de obra do dia) e PDF do resumo.',
