@@ -166,6 +166,9 @@ window.Pwa = (() => {
    * início ou no APK). Ao publicar uma versão com novidade, acrescente uma linha aqui.
    */
   const NOVIDADES = {
+    v39: [
+      'Controle de RDO: nome da Mão de Obra que serve para mais de uma conta não marca ninguém como entregue; Falta num RDO e presença em outro do mesmo dia conta pelo RDO em que a pessoa está presente.',
+    ],
     v38: [
       'Controle de RDO: quem está na Mão de Obra do RDO de outra pessoa (sem Falta) já conta como entregue, com o nome de quem enviou.',
     ],

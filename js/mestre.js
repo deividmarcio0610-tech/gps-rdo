@@ -560,11 +560,26 @@ window.Mestre = (() => {
     });
     // Pedido de 17/11/2026: quem está na Mão de Obra do RDO de outra pessoa (sem Falta) também
     // conta como entregue — o RDO saiu em nome de um e cobre a equipe toda.
+    // Regras (um verde errado esconde quem não entregou, então na dúvida fica vermelho):
+    //  - só entram os RDOs do dia escolhido (ctl.rdos já vem filtrado pelo dia) e preenchidos,
+    //    o mesmo critério do verde de quem enviou o próprio RDO;
+    //  - quem tem RDO próprio preenchido mostra o próprio, nunca "está no RDO de outra pessoa";
+    //  - linha com Falta não conta; quem tem Falta num RDO e está presente em outro do mesmo
+    //    dia conta como entregue pelo RDO em que está presente;
+    //  - nome que serve para mais de uma conta ("Tiago Souza" com "Tiago Souza Silva" e
+    //    "Tiago Souza Lima") não marca ninguém, a não ser que seja idêntico ao de uma só conta.
     const preenchidosDoDia = ctl.rdos.filter((r) => temConteudo(r.json));
-    pessoas.forEach((p) => {
-      p.viaOutros = p.preenchidos.length ? [] : preenchidosDoDia.filter((r) => r.dono !== p.id
-        && (r.json.workforce || []).some((w) => w?.status !== 'Falta' && mesmoNome(w?.name, p.nome)));
-    });
+    const igual = (a, b) => palavrasNome(a).join(' ') === palavrasNome(b).join(' ');
+    pessoas.forEach((p) => { p.viaOutros = []; });
+    preenchidosDoDia.forEach((r) => (r.json.workforce || []).forEach((w) => {
+      if (!w || w.status === 'Falta' || !String(w.name || '').trim()) return;
+      const iguais = pessoas.filter((p) => igual(w.name, p.nome));
+      const candidatos = iguais.length ? iguais : pessoas.filter((p) => mesmoNome(w.name, p.nome));
+      if (candidatos.length !== 1) return; // ninguém, ou ambíguo
+      const p = candidatos[0];
+      if (p.id === r.dono || p.preenchidos.length || p.viaOutros.includes(r)) return;
+      p.viaOutros.push(r);
+    }));
     const entregou = (p) => p.preenchidos.length || p.viaOutros.length;
     const porNome = (a, b) => a.nome.localeCompare(b.nome, 'pt-BR');
     return {
