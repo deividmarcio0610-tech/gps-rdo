@@ -166,6 +166,9 @@ window.Pwa = (() => {
    * início ou no APK). Ao publicar uma versão com novidade, acrescente uma linha aqui.
    */
   const NOVIDADES = {
+    v38: [
+      'Controle de RDO: quem está na Mão de Obra do RDO de outra pessoa (sem Falta) já conta como entregue, com o nome de quem enviou.',
+    ],
     v37: [
       'Botão "Atualizar o app" na tela inicial: confere e instala a versão nova na hora.',
       'Análise dos RDOs (conta principal): números de todos os RDOs da equipe, tarefas executadas e em andamento, equipamentos parados, horas paradas, ocorrências, por pessoa e por dia, com exportação para Excel.',

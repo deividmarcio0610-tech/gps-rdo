@@ -526,6 +526,24 @@ window.Mestre = (() => {
       .some((k) => String(j[k] || '').trim());
   }
 
+  /** Palavras do nome sem acento, caixa e preposições ("da", "de"...). */
+  const palavrasNome = (n) => String(n || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+    .split(/[^a-z0-9]+/).filter((x) => x && !['da', 'de', 'do', 'das', 'dos', 'e'].includes(x));
+
+  /**
+   * Nome da Mão de Obra é a mesma pessoa da conta? Igual, ou todas as palavras do nome mais
+   * curto (pelo menos duas: nome e sobrenome) aparecem no mais comprido — "Tiago Souza" e
+   * "Tiago Souza Silva". Só o primeiro nome não basta: com dois nomes iguais na equipe não dá
+   * para saber qual.
+   */
+  function mesmoNome(a, b) {
+    const x = palavrasNome(a); const y = palavrasNome(b);
+    if (!x.length || !y.length) return false;
+    if (x.join(' ') === y.join(' ')) return true;
+    const [curto, longo] = x.length <= y.length ? [x, y] : [y, x];
+    return curto.length >= 2 && curto.every((w) => longo.includes(w));
+  }
+
   /** Cada conta (sem a do supervisor) com os RDOs dela no dia; quem mandou e saiu da lista também aparece. */
   function situacao() {
     const porDono = new Map();
@@ -540,17 +558,27 @@ window.Mestre = (() => {
       if (conhecidos.has(dono)) return;
       pessoas.push(comRdos({ id: dono, nome: rdos[0].nome || rdos[0].email || 'sem nome', email: rdos[0].email || '', funcao: '' }, rdos));
     });
+    // Pedido de 17/11/2026: quem está na Mão de Obra do RDO de outra pessoa (sem Falta) também
+    // conta como entregue — o RDO saiu em nome de um e cobre a equipe toda.
+    const preenchidosDoDia = ctl.rdos.filter((r) => temConteudo(r.json));
+    pessoas.forEach((p) => {
+      p.viaOutros = p.preenchidos.length ? [] : preenchidosDoDia.filter((r) => r.dono !== p.id
+        && (r.json.workforce || []).some((w) => w?.status !== 'Falta' && mesmoNome(w?.name, p.nome)));
+    });
+    const entregou = (p) => p.preenchidos.length || p.viaOutros.length;
     const porNome = (a, b) => a.nome.localeCompare(b.nome, 'pt-BR');
     return {
-      fez: pessoas.filter((p) => p.preenchidos.length).sort(porNome),
-      naoFez: pessoas.filter((p) => !p.preenchidos.length).sort(porNome),
+      fez: pessoas.filter(entregou).sort(porNome),
+      naoFez: pessoas.filter((p) => !entregou(p)).sort(porNome),
     };
   }
 
   function pessoaHtml(p, fez) {
     const sub = [p.funcao, p.email].filter(Boolean).map(esc).join(' · ')
-      + (!fez && p.rdos.length ? `${p.funcao || p.email ? ' · ' : ''}só RDO em branco no dia` : '');
-    const rdos = p.rdos.map((r) => `
+      + (!fez && p.rdos.length ? `${p.funcao || p.email ? ' · ' : ''}só RDO em branco no dia` : '')
+      + (fez && p.viaOutros?.length ? `${p.funcao || p.email ? ' · ' : ''}está no RDO de ${p.viaOutros.map((r) => esc(r.nome || r.email || 'outra pessoa')).join(', ')}` : '');
+    const rdosVistos = p.preenchidos.length ? p.rdos : [...p.rdos, ...(p.viaOutros || [])];
+    const rdos = rdosVistos.map((r) => `
       <button class="btn ghost" data-abrir-ctl="${esc(r.docId)}" style="padding:4px 10px;font-size:12px">
         RDO ${esc(r.json.number)}${r.json.status === 'final' ? ' · finalizado' : ''}</button>`).join('');
     return `
@@ -594,7 +622,7 @@ window.Mestre = (() => {
         <button class="btn ghost" data-act="ctl-atualizar" style="font-size:12.5px">Atualizar</button>
         <div class="section-label">${fmtDate(diaCtl)}</div>
         ${corpo}
-        <p class="dica">Verde: a pessoa tem RDO preenchido com a data escolhida no banco. Vermelho: não tem, ou só tem RDO em branco. RDO feito sem internet só conta depois que subir.</p>`,
+        <p class="dica">Verde: a pessoa tem RDO preenchido com a data escolhida no banco, ou está na Mão de Obra (sem Falta) do RDO de outra pessoa nesse dia. Vermelho: não tem, ou só tem RDO em branco. RDO feito sem internet só conta depois que subir.</p>`,
       bind(root) {
         root.querySelector('#ctl-dia')?.addEventListener('change', (e) => {
           if (!e.target.value) return;
