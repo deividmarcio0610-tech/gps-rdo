@@ -176,6 +176,7 @@ window.Screens = (() => {
           <button class="action-card" data-go="tasks">${icon('clipboard')}Tarefas Realizadas${contagem('tasks')}</button>
           <button class="action-card" data-go="occurrences">${icon('alert')}Ocorrências${contagem('occurrences')}</button>
           <button class="action-card" data-go="photos">${icon('camera')}Fotos do RDO${contagem('photos')}</button>
+          ${window.Conta?.ehMestre?.() ? `<button class="action-card" data-go="galeria">${icon('image')}Galeria de Fotos</button>` : ''}
           ${window.Conta?.ehMestre?.()
             ? `<button class="action-card" data-act="relatorio-aba">${icon('output')}Gerar Relatório</button>`
             : `<button class="action-card wide" data-act="relatorio-campo">${icon('output', 20)}Gerar Relatório de Campo e Enviar</button>`}
@@ -183,7 +184,6 @@ window.Screens = (() => {
           ${window.Conta?.ehMestre?.() ? `<button class="action-card" data-act="controle-aba">${icon('clipboard')}Controle de RDO</button>` : ''}
           ${window.Conta?.ehMestre?.() ? `<button class="action-card wide" data-go="equipe">${icon('users', 20)}RDOs da Equipe</button>` : ''}
           ${window.Conta?.ehMestre?.() ? `<button class="action-card wide" data-go="analise">${icon('chart', 20)}Análise dos RDOs (números e Excel)</button>` : ''}
-          ${window.Conta?.ehMestre?.() ? `<button class="action-card wide" data-go="galeria">${icon('image', 20)}Galeria de fotos (por dia e atividade)</button>` : ''}
           <button class="action-card wide neutro-card" data-act="atualizar-app">${icon('refresh', 20)}Atualizar o app<span class="sub-card" data-versao-app></span></button>
           <button class="action-card wide neutro-card" data-go="backup">${icon('shield', 20)}Cópia de Segurança</button>
           <button class="action-card wide neutro-card" data-go="conta">${icon('lock', 20)}Minha Conta</button>

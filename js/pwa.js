@@ -166,6 +166,9 @@ window.Pwa = (() => {
    * início ou no APK). Ao publicar uma versão com novidade, acrescente uma linha aqui.
    */
   const NOVIDADES = {
+    v44: [
+      'Início: a Galeria de Fotos fica ao lado de Fotos do RDO (saiu do fim da lista).',
+    ],
     v43: [
       'Controle de RDO: qualquer parte do nome na Mão de Obra (primeiro, segundo ou terceiro nome) conta como feito. Quando o nome é só uma parte, tem grafia diferente ou serve para mais de uma conta, o cartão verde mostra "Conferir" com o nome como está no RDO.',
     ],
