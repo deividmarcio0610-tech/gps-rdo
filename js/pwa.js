@@ -10,7 +10,7 @@ window.Pwa = (() => {
   const ouvintes = [];
 
   // versão do código deste build; subir junto com o versionName do Gradle e com VERSAO do sw.js
-  const VERSAO_APP = '1.11';
+  const VERSAO_APP = '1.12';
   const APK_URL = 'https://github.com/deividmarcio0610-tech/gps-rdo/releases/latest/download/GPS-RDO.apk';
   const NATIVO = () => Boolean(window.Capacitor?.isNativePlatform?.());
 
@@ -166,6 +166,9 @@ window.Pwa = (() => {
    * início ou no APK). Ao publicar uma versão com novidade, acrescente uma linha aqui.
    */
   const NOVIDADES = {
+    v46: [
+      'APK 1.12: traz tudo da v42 à v45 (Controle de RDO por qualquer parte do nome, Galeria e Análise no início).',
+    ],
     v45: [
       'Início: Análise dos RDOs virou um quadradinho, igual aos outros do painel.',
     ],
