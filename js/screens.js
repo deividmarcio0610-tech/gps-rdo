@@ -181,7 +181,7 @@ window.Screens = (() => {
           ${window.Conta?.ehMestre?.()
             ? `<button class="action-card" data-act="relatorio-aba">${icon('output')}Gerar Relatório</button>`
             : `<button class="action-card wide" data-act="relatorio-campo">${icon('output', 20)}Gerar Relatório de Campo e Enviar</button>`}
-          <button class="action-card" data-act="resumo-zap">${icon('whatsapp')}Resumo Rápido (WhatsApp)</button>
+          ${window.Conta?.ehMestre?.() ? '' : `<button class="action-card" data-act="resumo-zap">${icon('whatsapp')}Envio Rápido ao Supervisor</button>`}
           ${window.Conta?.ehMestre?.() ? `<button class="action-card" data-go="month">${icon('chart')}Resumo do Mês</button>` : ''}
           ${window.Conta?.ehMestre?.() ? `<button class="action-card" data-act="controle-aba">${icon('clipboard')}Controle de RDO</button>` : ''}
           ${window.Conta?.ehMestre?.() ? `<button class="action-card wide" data-go="equipe">${icon('users', 20)}RDOs da Equipe</button>` : ''}
@@ -228,22 +228,37 @@ window.Screens = (() => {
           if (rdo) app.abrir(rdo.id);
           else app.go('report');
         });
-        // pedido do Tiago (áudio de 18/11/2026): "senti falta daquele botão que fazia um relatório
-        // rápido de mensagem no zap". É o mesmo "Enviar só o texto pelo WhatsApp" da tela do
-        // relatório, agora também na tela inicial, com o RDO aberto.
+        // Pedido do Tiago (áudio de 18/11/2026) e do dono: o colaborador manda rápido o resumo do
+        // RDO para o supervisor pelo WhatsApp e o RDO sobe para o banco ao mesmo tempo. Só na conta
+        // do colaborador: o supervisor manda o dele pelo relatório do dia ou do período (RDOs da Equipe).
+        // O número do supervisor fica guardado neste aparelho depois da primeira vez.
         root.querySelector('[data-act="resumo-zap"]')?.addEventListener('click', async () => {
-          if (!rdo) { toast('Abra ou crie um RDO antes de mandar o resumo.'); return; }
+          if (!rdo) { toast('Abra ou crie um RDO antes de enviar.'); return; }
+          const CHAVE_ZAP = 'gps_rdo_zap_supervisor';
+          let guardado = '';
+          try { guardado = localStorage.getItem(CHAVE_ZAP) || ''; } catch { /* sem armazenamento */ }
           const valores = await sheet({
-            title: 'Resumo rápido pelo WhatsApp',
-            text: `O texto resumido do RDO ${rdo.number} será aberto no WhatsApp (sem as fotos). Deixe o número em branco para escolher o contato no aplicativo.`,
+            title: 'Envio rápido ao supervisor',
+            text: `O RDO ${rdo.number} sobe para o banco do supervisor e o resumo em texto abre no WhatsApp (sem as fotos). O número fica guardado neste aparelho.`,
             fields: [
-              { key: 'telefone', label: 'Número com DDD (opcional)', placeholder: 'Ex.: 18997123456' },
+              { key: 'telefone', label: 'WhatsApp do supervisor (com DDD)', placeholder: 'Ex.: 31999998888', value: guardado },
             ],
-            submit: 'Abrir WhatsApp',
+            submit: 'Salvar e abrir WhatsApp',
           });
           if (!valores) return;
-          Whatsapp.enviar(rdo, valores.telefone || '');
-          toast('Resumo aberto no WhatsApp.');
+          let numero = String(valores.telefone || '').replace(/\D/g, '');
+          if (numero) { try { localStorage.setItem(CHAVE_ZAP, numero); } catch { /* sem espaço */ } }
+          // só com DDD (10 ou 11 dígitos): o link do WhatsApp precisa do 55 do Brasil na frente
+          if (numero.length === 10 || numero.length === 11) numero = `55${numero}`;
+          // sobe antes de sair para o WhatsApp, sem esperar (o navegador só abre a janela no toque)
+          const subida = window.Conta?.ativo?.() ? window.Conta.enviarTudo({ silencioso: true, completo: false }) : null;
+          Whatsapp.enviar(rdo, numero);
+          if (!subida) { toast('Resumo aberto no WhatsApp. Entre na sua conta para o RDO ir para o banco.'); return; }
+          const r = await subida.catch((e) => ({ erro: e?.message || String(e) }));
+          const falta = (window.Conta?.pendentes?.() || []).some((x) => x.id === rdo.id);
+          if (!falta) toast(`RDO ${rdo.number} salvo no banco e resumo aberto no WhatsApp.`);
+          else if (r?.semRede) toast('Sem internet: o RDO fica guardado aqui e sobe sozinho quando a rede voltar.');
+          else toast(`O RDO ainda não subiu${r?.erro ? ` (${r.erro})` : ''}. Ele tenta de novo sozinho.`);
         });
         // pedido de 09/11/2026: Controle de RDO (quem fez e quem não fez) também abre em aba nova
         root.querySelector('[data-act="controle-aba"]')?.addEventListener('click', () => {

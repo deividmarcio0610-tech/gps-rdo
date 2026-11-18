@@ -166,6 +166,9 @@ window.Pwa = (() => {
    * início ou no APK). Ao publicar uma versão com novidade, acrescente uma linha aqui.
    */
   const NOVIDADES = {
+    v50: [
+      'Colaborador: quadradinho Envio Rápido ao Supervisor sobe o RDO para o banco e abre o resumo no WhatsApp do supervisor (o número fica guardado). Na conta principal o envio pelo WhatsApp segue em RDOs da Equipe, no relatório do dia ou do período.',
+    ],
     v49: [
       'APK 1.13: traz tudo até a v48 (Análise e Galeria no topo do início, Resumo Rápido pelo WhatsApp).',
     ],
