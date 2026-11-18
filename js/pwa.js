@@ -166,6 +166,9 @@ window.Pwa = (() => {
    * início ou no APK). Ao publicar uma versão com novidade, acrescente uma linha aqui.
    */
   const NOVIDADES = {
+    v47: [
+      'Início: Análise dos RDOs subiu para o grupo de quadradinhos do topo, ao lado de Galeria de Fotos.',
+    ],
     v46: [
       'APK 1.12: traz tudo da v42 à v45 (Controle de RDO por qualquer parte do nome, Galeria e Análise no início).',
     ],
