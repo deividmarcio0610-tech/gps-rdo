@@ -166,6 +166,9 @@ window.Pwa = (() => {
    * início ou no APK). Ao publicar uma versão com novidade, acrescente uma linha aqui.
    */
   const NOVIDADES = {
+    v48: [
+      'Início: quadradinho Resumo Rápido (WhatsApp) manda o texto do RDO aberto direto para o WhatsApp.',
+    ],
     v47: [
       'Início: Análise dos RDOs subiu para o grupo de quadradinhos do topo, ao lado de Galeria de Fotos.',
     ],
