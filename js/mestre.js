@@ -150,7 +150,11 @@ window.Mestre = (() => {
    * a equipe de todos (sem repetir pessoa) e o turno de cada um na coluna Equipe.
    */
   function juntarDoDia(rdos, data) {
-    const lista = rdos.slice().sort((a, b) => String(a.number).localeCompare(String(b.number), 'pt-BR', { numeric: true }));
+    // RDO em branco não entra na junção: entrar numa seção já cria um e ele sobe para o banco.
+    // Se ele viesse primeiro na ordem do número, o cabeçalho do relatório do dia saía vazio e o
+    // número repetido (revisão da v56, 25/11/2026). Dia só com RDO em branco segue como antes.
+    const cheios = rdos.filter((r) => temConteudo(r));
+    const lista = (cheios.length ? cheios : rdos).slice().sort((a, b) => String(a.number).localeCompare(String(b.number), 'pt-BR', { numeric: true }));
     const base = { ...lista[0] };
     const turnos = [...new Set(lista.map((r) => String(r.shift || '').trim()).filter(Boolean))];
     const pessoas = [];

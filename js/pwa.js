@@ -10,7 +10,7 @@ window.Pwa = (() => {
   const ouvintes = [];
 
   // versão do código deste build; subir junto com o versionName do Gradle e com VERSAO do sw.js
-  const VERSAO_APP = '1.16';
+  const VERSAO_APP = '1.17';
   const APK_URL = 'https://github.com/deividmarcio0610-tech/gps-rdo/releases/latest/download/GPS-RDO.apk';
   const NATIVO = () => Boolean(window.Capacitor?.isNativePlatform?.());
 
@@ -179,7 +179,16 @@ window.Pwa = (() => {
     'Máquina da lista pode ser salva só com o horímetro; o status fica para depois. O PDF e o WhatsApp mostram o nome e a TAG.',
     'Conta principal: tela Lista de Equipamentos, para importar a planilha (.xlsx). A planilha é lida no próprio aparelho, e vai para o banco só grupo, modelo, frota e TAG.',
   ];
+  // A v56 tira a importação do Início (pedido do dono de 25/11/2026) e conta de novo a lista do
+  // cliente, agora dizendo que ela só aparece depois que a conta principal importar a planilha:
+  // até a v55 ela não tinha chegado a nenhum aparelho.
   const NOVIDADES = {
+    v56: [
+      'APK 1.17: traz a escolha de equipamentos pela lista do cliente.',
+      'Equipamentos: quando a lista do cliente chegar ao aparelho, aparece o botão Escolher da lista, com as máquinas em grupos e busca por frota, modelo ou TAG. Marque as do dia e toque em Adicionar marcados. Digitar outro serve para o que não está na lista. Enquanto a lista não chega, tudo segue como antes.',
+      NOVIDADES_V54[1],
+      'Conta principal: para importar a planilha (.xlsx), toque em Equipamentos e depois em Importar planilha (o botão saiu do Início). A planilha é lida no próprio aparelho, e vai para o banco só grupo, modelo, frota e TAG. Depois de gravar, a lista chega aos aparelhos da equipe que estiverem com internet, quando abrirem Equipamentos.',
+    ],
     v55: [
       'APK 1.16: traz a lista de equipamentos do cliente (v54).',
       ...NOVIDADES_V54,

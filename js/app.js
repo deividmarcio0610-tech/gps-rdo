@@ -24,7 +24,9 @@
   };
 
   // telas que funcionam sem um RDO aberto (a de apagar não pode recriar o que acabou de sumir;
-  // a Lista de Equipamentos não cria RDO em branco)
+  // a Lista de Equipamentos não cria RDO em branco). Desde a v56 a Lista abre por Equipamentos,
+  // que cria ou reaproveita o rascunho do dia como qualquer seção; o RDO em branco fica fora do
+  // relatório junto do dia (Mestre.juntarDoDia).
   const SEM_RDO = new Set(['home', 'reports', 'backup', 'month', 'roster', 'conta', 'equipe', 'controle', 'analise', 'galeria', 'equipamentos', 'sair']);
 
   // APK sempre da última versão publicada no GitHub (fora do service worker do site)

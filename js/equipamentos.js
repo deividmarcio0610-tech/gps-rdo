@@ -608,7 +608,7 @@ window.Equipamentos = (() => {
 
         root.querySelector('[data-act="buscar"]').addEventListener('click', async () => {
           const r = await atualizar({ forcar: true });
-          if (r.codigo === 'permission-denied') aviso = 'O banco recusou a leitura: a regra da lista ainda não foi publicada no console do Firebase.';
+          if (r.codigo === 'permission-denied') aviso = 'O banco recusou a leitura: a regra da lista ainda não foi publicada no console do Firebase. Avise quem cuida do app.';
           else if (r.erro) aviso = r.erro;
           else if (r.naFila) aviso = AVISO_FILA;
           else aviso = '';
@@ -646,7 +646,7 @@ window.Equipamentos = (() => {
           ].filter(Boolean).join(' ');
           const ok = await sheet({
             title: `Gravar ${r.itens.length} equipamento(s)?`,
-            text: `${partes}. ${extras} A lista nova substitui a que está no banco.`,
+            text: `${partes}. ${extras} A lista nova substitui a que está no banco. Os RDOs já lançados não mudam.`,
             submit: 'Gravar no banco',
           });
           if (!ok) return;
@@ -664,7 +664,7 @@ window.Equipamentos = (() => {
           };
           const recusou = (e) => {
             aviso = e?.codigo === 'permission-denied'
-              ? 'O banco recusou a gravação: a regra da lista ainda não foi publicada no console do Firebase.'
+              ? 'O banco recusou a gravação: a regra da lista ainda não foi publicada no console do Firebase. Avise quem cuida do app.'
               : (e?.message || 'Não deu para gravar a lista.');
             toast('A lista não foi gravada.');
           };

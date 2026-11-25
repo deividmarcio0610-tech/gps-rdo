@@ -186,7 +186,6 @@ window.Screens = (() => {
           ${window.Conta?.ehMestre?.() ? `<button class="action-card" data-go="month">${icon('chart')}Resumo do Mês</button>` : ''}
           ${window.Conta?.ehMestre?.() ? `<button class="action-card" data-act="controle-aba">${icon('clipboard')}Controle de RDO</button>` : ''}
           ${window.Conta?.ehMestre?.() ? `<button class="action-card wide" data-go="equipe">${icon('users', 20)}RDOs da Equipe</button>` : ''}
-          ${window.Conta?.ehMestre?.() && window.Equipamentos ? `<button class="action-card wide" data-go="equipamentos">${icon('truck', 20)}Lista de Equipamentos</button>` : ''}
           <button class="action-card wide neutro-card" data-act="atualizar-app">${icon('refresh', 20)}Atualizar o app<span class="sub-card" data-versao-app></span></button>
           <button class="action-card wide neutro-card" data-go="backup">${icon('shield', 20)}Cópia de Segurança</button>
           <button class="action-card wide neutro-card" data-go="conta">${icon('lock', 20)}Minha Conta</button>
@@ -730,15 +729,21 @@ window.Screens = (() => {
       ? `<button class="btn primary block" data-act="lista">${icon('truck', 16)}Escolher da lista</button>
          <button class="btn ghost block" data-act="add">${icon('plus', 16)}Digitar outro</button>`
       : `<button class="btn primary block" data-act="add">${icon('plus', 16)}Equipamento</button>`;
+    // a conta principal importa a planilha daqui (pedido do dono de 25/11/2026, v56: o botão saiu
+    // do Início). Aparece mesmo com o RDO fechado, porque a lista não é do RDO.
+    const importar = window.Conta?.ehMestre?.() && window.Equipamentos
+      ? `<button class="btn ghost block" data-go="equipamentos">${icon('file', 16)}Importar planilha</button>` : '';
     return {
       titulo: TITULOS.equipment,
       html: `
         ${trava ? avisoTravado(rdo) : botoes}
+        ${importar}
         ${botaoCopiar(rdo, 'equipmentList', 'os equipamentos')}
         ${rdo.equipmentList.length === 0
           ? `<div class="empty-state">Nenhum equipamento no relatório.<br>${lista
             ? 'Toque em <strong>Escolher da lista</strong> e marque os equipamentos.'
-            : 'Toque em <strong>Equipamento</strong> para incluir.'}</div>`
+            : 'Toque em <strong>Equipamento</strong> para incluir.'
+              + (importar ? '<br>Para a equipe escolher da lista do cliente, toque em <strong>Importar planilha</strong>.' : '')}</div>`
           : rdo.equipmentList.map((e, i) => `
             <div class="card">
               <button class="body editar" data-editar="${i}"${trava ? ' disabled' : ''}>
@@ -752,6 +757,7 @@ window.Screens = (() => {
             </div>`).join('')}
         ${rdo.equipmentList.length && !trava ? '<p class="dica">Toque no equipamento para informar o status, corrigir ou digitar o horímetro.</p>' : ''}`,
       bind(root) {
+        root.querySelector('[data-go="equipamentos"]')?.addEventListener('click', () => app.go('equipamentos'));
         if (trava) return;
 
         // escolher da lista do cliente: marca vários de uma vez; entram sem status e sem horímetro
