@@ -10,7 +10,7 @@ window.Pwa = (() => {
   const ouvintes = [];
 
   // versão do código deste build; subir junto com o versionName do Gradle e com VERSAO do sw.js
-  const VERSAO_APP = '1.17';
+  const VERSAO_APP = '1.18';
   const APK_URL = 'https://github.com/deividmarcio0610-tech/gps-rdo/releases/latest/download/GPS-RDO.apk';
   const NATIVO = () => Boolean(window.Capacitor?.isNativePlatform?.());
 
@@ -182,7 +182,16 @@ window.Pwa = (() => {
   // A v56 tira a importação do Início (pedido do dono de 25/11/2026) e conta de novo a lista do
   // cliente, agora dizendo que ela só aparece depois que a conta principal importar a planilha:
   // até a v55 ela não tinha chegado a nenhum aparelho.
+  // A v57 leva a importação para Minha Conta (pedido do dono de 25/11/2026) e conta de novo o
+  // Escolher da lista: a v56 ficou pouco tempo no ar, e quem abre o app pula da v55 direto para a
+  // v57. A lista do cliente já está no banco, e cada aparelho a busca sozinho quando tem internet.
   const NOVIDADES = {
+    v57: [
+      'APK 1.18: traz a escolha de equipamentos pela lista do cliente.',
+      'Equipamentos: o botão Escolher da lista mostra as máquinas da lista do cliente, em grupos e com busca por frota, modelo ou TAG. Marque as do dia e toque em Adicionar marcados. Digitar outro serve para o que não está na lista. A lista chega sozinha ao aparelho quando ele tem internet.',
+      NOVIDADES_V54[1],
+      'Conta principal: para trocar a lista de equipamentos, toque em Minha Conta e depois em Importar planilha de equipamentos. O botão saiu de Equipamentos, que ficou só para escolher as máquinas do RDO. A planilha é lida no próprio aparelho, e vai para o banco só grupo, modelo, frota e TAG.',
+    ],
     v56: [
       'APK 1.17: traz a escolha de equipamentos pela lista do cliente.',
       'Equipamentos: quando a lista do cliente chegar ao aparelho, aparece o botão Escolher da lista, com as máquinas em grupos e busca por frota, modelo ou TAG. Marque as do dia e toque em Adicionar marcados. Digitar outro serve para o que não está na lista. Enquanto a lista não chega, tudo segue como antes.',

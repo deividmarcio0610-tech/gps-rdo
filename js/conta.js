@@ -983,6 +983,11 @@ window.Conta = (() => {
 
   function htmlConta(logado) {
     const u = logado || {};
+    // a conta principal troca a lista de equipamentos do cliente por aqui (pedido do dono de
+    // 25/11/2026, v57): a importação saiu de Equipamentos, que ficou só para a equipe escolher
+    // as máquinas do RDO. A tela da lista não cria RDO (SEM_RDO, em js/app.js).
+    const importarLista = u.mestre && window.Equipamentos
+      ? `<button class="btn ghost block" data-act="lista-equipamentos">${icon('file', 16)}Importar planilha de equipamentos</button>` : '';
     return `
       <div class="card"><div class="body">
         <div class="name">${esc(u.nome || 'Sua conta')}</div>
@@ -997,6 +1002,7 @@ window.Conta = (() => {
       ${u.assinatura ? `<div class="field"><label>Sua assinatura</label><img class="assina-img" src="${esc(u.assinatura)}" alt="Assinatura"></div>` : ''}
       <button class="btn primary block" data-act="enviar">${icon('upload', 16)}Enviar meus RDOs agora</button>
       <button class="btn ghost block" data-act="atualizar">${icon('download', 16)}Procurar atualização do app</button>
+      ${importarLista}
       <button class="btn ghost block" data-act="recuperar-senha">${icon('mail', 16)}Recuperar a senha por e-mail</button>
       <button class="btn ghost block" data-act="senha">${icon('lock', 16)}Trocar a senha</button>
       <button class="btn ghost block" data-act="foto-rosto">${icon('camera', 16)}${u.facial ? 'Trocar a foto do rosto' : 'Tirar a foto do rosto'}</button>
@@ -1280,6 +1286,9 @@ window.Conta = (() => {
             }
           });
         });
+
+        // lista de equipamentos do cliente: o botão só existe na conta principal (v57)
+        root.querySelector('[data-act="lista-equipamentos"]')?.addEventListener('click', () => window.__rdo?.app?.go?.('equipamentos'));
 
         // sair tem página própria: mostra o que ainda não subiu e leva para o login
         root.querySelector('[data-act="sair"]')?.addEventListener('click', () => window.__rdo?.app?.go?.('sair'));

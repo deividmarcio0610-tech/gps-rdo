@@ -729,21 +729,18 @@ window.Screens = (() => {
       ? `<button class="btn primary block" data-act="lista">${icon('truck', 16)}Escolher da lista</button>
          <button class="btn ghost block" data-act="add">${icon('plus', 16)}Digitar outro</button>`
       : `<button class="btn primary block" data-act="add">${icon('plus', 16)}Equipamento</button>`;
-    // a conta principal importa a planilha daqui (pedido do dono de 25/11/2026, v56: o botão saiu
-    // do Início). Aparece mesmo com o RDO fechado, porque a lista não é do RDO.
-    const importar = window.Conta?.ehMestre?.() && window.Equipamentos
-      ? `<button class="btn ghost block" data-go="equipamentos">${icon('file', 16)}Importar planilha</button>` : '';
+    // a importação da planilha não fica aqui: esta tela é só para escolher e lançar os
+    // equipamentos do RDO. A conta principal troca a lista em Minha Conta (pedido do dono de
+    // 25/11/2026, v57; na v56 o botão Importar planilha ficava aqui e, antes, no Início).
     return {
       titulo: TITULOS.equipment,
       html: `
         ${trava ? avisoTravado(rdo) : botoes}
-        ${importar}
         ${botaoCopiar(rdo, 'equipmentList', 'os equipamentos')}
         ${rdo.equipmentList.length === 0
           ? `<div class="empty-state">Nenhum equipamento no relatório.<br>${lista
             ? 'Toque em <strong>Escolher da lista</strong> e marque os equipamentos.'
-            : 'Toque em <strong>Equipamento</strong> para incluir.'
-              + (importar ? '<br>Para a equipe escolher da lista do cliente, toque em <strong>Importar planilha</strong>.' : '')}</div>`
+            : 'Toque em <strong>Equipamento</strong> para incluir.'}</div>`
           : rdo.equipmentList.map((e, i) => `
             <div class="card">
               <button class="body editar" data-editar="${i}"${trava ? ' disabled' : ''}>
@@ -757,7 +754,6 @@ window.Screens = (() => {
             </div>`).join('')}
         ${rdo.equipmentList.length && !trava ? '<p class="dica">Toque no equipamento para informar o status, corrigir ou digitar o horímetro.</p>' : ''}`,
       bind(root) {
-        root.querySelector('[data-go="equipamentos"]')?.addEventListener('click', () => app.go('equipamentos'));
         if (trava) return;
 
         // escolher da lista do cliente: marca vários de uma vez; entram sem status e sem horímetro
@@ -1925,7 +1921,8 @@ window.Screens = (() => {
   const galeria = (rdo) => (window.Galeria && window.Conta?.ehMestre?.() ? window.Galeria.tela(app) : home(rdo));
   const analise = (rdo) => (window.Analise && window.Conta?.ehMestre?.() ? window.Analise.tela(app) : home(rdo));
 
-  // importar a planilha das máquinas (pedido de 24/11/2026), só da conta principal
+  // importar a planilha das máquinas (pedido de 24/11/2026), só da conta principal; abre pelo
+  // botão Importar planilha de equipamentos, em Minha Conta (v57)
   const equipamentos = (rdo) => (window.Equipamentos && window.Conta?.ehMestre?.() ? window.Equipamentos.tela(app) : home(rdo));
 
   // página de sair (pedido de 10/11/2026): confirma e leva para a tela de entrar
