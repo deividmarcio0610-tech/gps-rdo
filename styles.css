@@ -558,6 +558,20 @@ label.check input { width: 22px; height: 22px; accent-color: var(--orange); flex
 label.check span { flex: 1; }
 label.check small { font-size: 11px; color: var(--text-soft); }
 label.check.off { opacity: 0.55; }
+/* lista grande com busca (equipamentos do cliente): o que a busca esconde some de verdade
+   (label.check é flex e venceria o [hidden] do navegador); busca e botões ficam à vista */
+.checks [hidden] { display: none !important; }
+.checks-busca { position: sticky; top: 0; z-index: 1; box-shadow: 0 6px 10px -8px rgba(0, 0, 0, 0.35); }
+.checks-nada { text-align: center; padding: 6px 0; }
+/* folha com busca: a busca gruda na borda de cima (o -16px desconta o padding da folha) e os
+   botões na de baixo, sem fresta por onde a lista apareça; o recuo do iPhone conta uma vez só */
+.sheet.com-busca { padding-bottom: 0; }
+.sheet.com-busca .checks-busca { top: -16px; }
+.sheet.com-busca .sheet-actions {
+  position: sticky; bottom: 0; z-index: 1; background: var(--bg);
+  padding: 8px 0 calc(12px + env(safe-area-inset-bottom, 0px));
+  box-shadow: 0 -6px 10px -8px rgba(0, 0, 0, 0.35);
+}
 .history .row.pessoa { cursor: default; }
 .badge svg { display: inline-block; vertical-align: -1px; }
 
@@ -735,9 +749,13 @@ label.check.off { opacity: 0.55; }
   animation: rise 0.18s ease-out;
 }
 
+/* modo campo: o zoom de 1.15 aumenta também a altura; dividida aqui, a folha cabe na tela */
+body.campo .scrim .sheet { max-height: calc((92vh - env(safe-area-inset-top, 0px)) / 1.15); }
+
 /* altura que acompanha a barra do Safari e o teclado */
 @supports (height: 100dvh) {
   .sheet { max-height: calc(92dvh - env(safe-area-inset-top, 0px)); }
+  body.campo .scrim .sheet { max-height: calc((92dvh - env(safe-area-inset-top, 0px)) / 1.15); }
 }
 
 @keyframes rise { from { transform: translateY(14px); opacity: 0.7; } to { transform: none; opacity: 1; } }

@@ -23,8 +23,9 @@
     rolarAoRelatorio: false,
   };
 
-  // telas que funcionam sem um RDO aberto (a de apagar não pode recriar o que acabou de sumir)
-  const SEM_RDO = new Set(['home', 'reports', 'backup', 'month', 'roster', 'conta', 'equipe', 'controle', 'analise', 'galeria', 'sair']);
+  // telas que funcionam sem um RDO aberto (a de apagar não pode recriar o que acabou de sumir;
+  // a Lista de Equipamentos não cria RDO em branco)
+  const SEM_RDO = new Set(['home', 'reports', 'backup', 'month', 'roster', 'conta', 'equipe', 'controle', 'analise', 'galeria', 'equipamentos', 'sair']);
 
   // APK sempre da última versão publicada no GitHub (fora do service worker do site)
   const APK_URL = 'https://github.com/deividmarcio0610-tech/gps-rdo/releases/latest/download/GPS-RDO.apk';

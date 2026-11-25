@@ -60,7 +60,9 @@ window.Analise = (() => {
       const nome = quem(x);
       const base = { data: r.date, rdo: r.number, pessoa: nome, local: r.location || '' };
       const ts = (r.tasks || []).map((t) => ({ ...base, os: t.os || '', tag: t.tag || '', descricao: t.description || '', tipo: t.maintenanceType || r.maintenanceType || '', area: t.area || '', execucao: pct(t.progress), chave: chaveTarefa(t) }));
-      const eqs = (r.equipmentList || []).map((e) => ({ ...base, equipamento: e.name || '', status: e.status || 'Sem status', horimetroIni: e.hoursStart ?? '', horimetroFim: e.hoursEnd ?? '' }));
+      // TAG só do que veio da lista do cliente (marca `lista`); o código antigo "Código /
+      // patrimônio" (até a v19) é digitado e conta pelo nome (revisão de 25/11/2026)
+      const eqs = (r.equipmentList || []).map((e) => ({ ...base, equipamento: e.name || '', tag: e.lista ? String(e.code || '').trim().toUpperCase() : '', status: e.status || 'Sem status', horimetroIni: e.hoursStart ?? '', horimetroFim: e.hoursEnd ?? '' }));
       const ps = (r.stoppages || []).map((p) => ({ ...base, inicio: p.start || '', fim: p.end || '', motivo: p.reason || 'Sem motivo', obs: p.note || '', minutos: Store.minutosParada(p) }));
       // desvios (pedido de 24/11/2026: "Ocorrências" viraram "Desvios"; o dado continua em occurrences)
       const ocs = (r.occurrences || []).map((o) => ({ ...base, tipo: o.type || 'Sem tipo', descricao: o.description || '', hora: o.time || '', onde: o.location || '' }));
@@ -76,7 +78,8 @@ window.Analise = (() => {
       rdos.push({
         ...base, status: r.status === 'final' ? 'Finalizado' : 'Rascunho', tipo: r.maintenanceType || '', turno: r.shift || '',
         tarefas: ts.length, executadas: ts.filter((t) => t.execucao >= 100).length,
-        equipParados: eqs.filter((e) => e.status !== 'Operando').length, minParados, ocorrencias: ocs.length,
+        // parado ou em manutenção; o que veio da lista e ainda está sem status não conta
+        equipParados: eqs.filter((e) => e.status !== 'Operando' && e.status !== 'Sem status').length, minParados, ocorrencias: ocs.length,
         pessoasNoRdo: (r.workforce || []).length,
       });
       const p = pessoas.get(nome) || { pessoa: nome, rdos: 0, tarefas: 0, executadas: 0, emAndamento: 0, minParados: 0, ultimo: '' };
@@ -98,9 +101,30 @@ window.Analise = (() => {
     const emAndamento = unicas.filter((t) => t.execucao > 0 && t.execucao < 100);
     const naoIniciadas = unicas.filter((t) => t.execucao === 0);
 
-    // equipamento: o último status de cada um no período
+    // equipamento: o último status de cada um no período, pela TAG da lista. O digitado (sem TAG)
+    // conta pelo nome e junta com o da lista quando o nome bate com uma TAG só no período: o mesmo
+    // equipamento digitado num dia e escolhido da lista no outro é um só (revisão de 25/11/2026).
+    // Dois da lista com o mesmo nome e TAG diferente contam separados, e um RDO em que o
+    // equipamento ainda está sem status não apaga o último status informado.
+    const nomeEq = (e) => String(e.equipamento).trim().toLowerCase();
+    const tagsPorNome = new Map();
+    equipamentos.forEach((e) => {
+      if (!e.tag) return;
+      if (!tagsPorNome.has(nomeEq(e))) tagsPorNome.set(nomeEq(e), new Set());
+      tagsPorNome.get(nomeEq(e)).add(e.tag);
+    });
+    const chaveEquip = (e) => {
+      if (e.tag) return `tag:${e.tag}`;
+      const tags = tagsPorNome.get(nomeEq(e));
+      return tags?.size === 1 ? `tag:${[...tags][0]}` : `nome:${nomeEq(e)}`;
+    };
     const ultimoEquip = new Map();
-    equipamentos.forEach((e) => ultimoEquip.set(String(e.equipamento).trim().toLowerCase(), e));
+    equipamentos.forEach((e) => {
+      const chave = chaveEquip(e);
+      const antes = ultimoEquip.get(chave);
+      if (e.status === 'Sem status' && antes && antes.status !== 'Sem status') return;
+      ultimoEquip.set(chave, e);
+    });
     const equipAtual = [...ultimoEquip.values()];
 
     const contar = (itens, campo) => {
@@ -135,8 +159,9 @@ window.Analise = (() => {
       return x ? 'Outras' : 'Sem tipo';
     };
     const prevCorr = contarTexto(tarefas, tipoDe);
-    // equipamento mais atendido: TAG da tarefa; sem TAG, o equipamento da lista do RDO
-    const alvos = contarTexto([...tarefas.map((t) => t.tag), ...equipamentos.map((e) => e.equipamento)], (x) => x);
+    // equipamento mais atendido: TAG da tarefa; sem TAG, o equipamento da lista do RDO. A máquina
+    // escolhida da lista conta pela TAG, a mesma que as tarefas usam (2ª revisão de 25/11/2026)
+    const alvos = contarTexto([...tarefas.map((t) => t.tag), ...equipamentos.map((e) => e.tag || e.equipamento)], (x) => x);
     // mão de obra presente no dia mais recente do período
     const diaMaoDeObra = maoDeObra.reduce((m, w) => (w.data > m ? w.data : m), '');
     const maoDoDia = maoDeObra.filter((w) => w.data === diaMaoDeObra);

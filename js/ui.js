@@ -41,6 +41,9 @@ window.UI = (() => {
 
   const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+  // para comparar texto digitado na busca: sem acento e em minúsculas
+  const semAcento = (v) => String(v ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
   // Só data de verdade vira dd/mm/aaaa. O resultado entra direto no HTML das telas, então
   // um RDO vindo do banco com outra coisa no campo da data não pode sair cru daqui.
   const fmtDate = (iso) => {
@@ -102,9 +105,16 @@ window.UI = (() => {
       scrim.className = 'scrim';
       const campos = fields.map((f, i) => {
         const id = `f_${i}`;
-        // lista de marcar, em grupos (ex.: escolher da equipe); volta o array dos valores marcados
+        // lista de marcar, em grupos (ex.: escolher da equipe); volta o array dos valores marcados.
+        // `busca: true` põe um campo de busca em cima (lista grande, ex.: equipamentos do cliente);
+        // o que a busca esconde continua marcado.
         if (f.type === 'checks') {
-          return `<div class="checks" data-checks="${esc(f.key)}">${(f.grupos || []).map((g, gi) => `
+          const busca = f.busca
+            ? `<input type="search" class="checks-busca" data-busca autocomplete="off" enterkeyhint="search"
+                placeholder="${esc(f.placeholderBusca || 'Buscar')}" aria-label="${esc(f.placeholderBusca || 'Buscar na lista')}">
+               <p class="dica checks-nada" data-nada hidden>Nada encontrado com esse texto.</p>`
+            : '';
+          return `<div class="checks" data-checks="${esc(f.key)}">${busca}${(f.grupos || []).map((g, gi) => `
             <div class="checks-grupo">
               <div class="checks-titulo"><span>${esc(g.titulo)}</span>
                 <button type="button" class="btn ghost" data-act="todos" data-grupo="${gi}">Marcar todos</button></div>
@@ -136,7 +146,7 @@ window.UI = (() => {
       }).join('');
 
       scrim.innerHTML = `
-        <div class="sheet" role="dialog" aria-modal="true">
+        <div class="sheet${fields.some((f) => f.busca) ? ' com-busca' : ''}" role="dialog" aria-modal="true">
           <h2>${esc(title)}</h2>
           ${text ? `<div style="font-size:13px;line-height:1.5;color:var(--text-soft)">${esc(text)}</div>` : ''}
           ${campos}
@@ -155,8 +165,8 @@ window.UI = (() => {
         const act = alvo?.dataset.act;
         if (act === 'cancel') fechar(null);
         if (act === 'todos') {
-          // marca o grupo inteiro; se já estava tudo marcado, desmarca
-          const caixas = [...scrim.querySelectorAll(`label.check[data-grupo="${alvo.dataset.grupo}"] input:not(:disabled)`)];
+          // marca o grupo inteiro; se já estava tudo marcado, desmarca. Com busca, só o que está à vista.
+          const caixas = [...scrim.querySelectorAll(`label.check[data-grupo="${alvo.dataset.grupo}"]:not([hidden]) input:not(:disabled)`)];
           const marcar = caixas.some((c) => !c.checked);
           caixas.forEach((c) => { c.checked = marcar; });
         }
@@ -173,10 +183,34 @@ window.UI = (() => {
           fechar(valores);
         }
       });
+      // busca da lista de marcar: cada palavra tem que aparecer no item ou no título do grupo
+      // (sem diferença de acento e de maiúscula); grupo sem nada à vista some
+      scrim.querySelectorAll('[data-busca]').forEach((campo) => {
+        const bloco = campo.closest('[data-checks]');
+        const nada = bloco.querySelector('[data-nada]');
+        campo.addEventListener('input', () => {
+          const termos = semAcento(campo.value).split(/\s+/).filter(Boolean);
+          let algum = false;
+          bloco.querySelectorAll('.checks-grupo').forEach((g) => {
+            const titulo = semAcento(g.querySelector('.checks-titulo span')?.textContent || '');
+            let noGrupo = false;
+            g.querySelectorAll('label.check').forEach((l) => {
+              const texto = `${titulo} ${semAcento(l.textContent)}`;
+              const mostra = termos.every((t) => texto.includes(t));
+              l.hidden = !mostra;
+              if (mostra) noGrupo = true;
+            });
+            g.hidden = !noGrupo;
+            if (noGrupo) algum = true;
+          });
+          if (nada) nada.hidden = algum;
+        });
+      });
       document.body.appendChild(scrim);
       ligarDitado(scrim);
       onOpen?.(scrim);
-      const primeiro = scrim.querySelector('input, select, textarea');
+      // a busca não ganha o foco sozinha: no celular o teclado subiria por cima da lista
+      const primeiro = scrim.querySelector('input:not([data-busca]), select, textarea');
       if (!primeiro?.readOnly) primeiro?.focus();
     });
   }

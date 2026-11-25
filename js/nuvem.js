@@ -481,11 +481,85 @@ window.Nuvem = (() => {
     esquecerFotos(docId);
   }
 
+  // ------------------------------------------------------------ lista de equipamentos
+
+  // um documento só: a lista inteira (até 1000 itens) cabe folgada no limite de 1 MB
+  const docEquipamentos = () => db.collection('config').doc('equipamentos');
+  // sem série e sem nota (revisão de 25/11/2026): qualquer conta logada lê a lista
+  const CAMPOS_EQUIPAMENTO = ['grupo', 'modelo', 'frota', 'tag'];
+
+  /**
+   * Lista de equipamentos do cliente (js/equipamentos.js), em `config/equipamentos`. Quem está
+   * logado lê. Devolve null quando a conta principal ainda não importou a planilha; sem conta,
+   * lança com o código 'sem-conta' (antes também devolvia null, e a tela dizia que o banco não
+   * tinha lista). `pendente`: o que veio é a gravação deste aparelho que ainda espera na fila do
+   * Firestore, que a leitura já mostra antes de ela chegar ao banco (2ª revisão de 25/11/2026).
+   */
+  async function listaEquipamentos() {
+    await iniciar();
+    if (!atual()) {
+      const erro = new Error('Entre na sua conta.');
+      erro.codigo = 'sem-conta';
+      throw erro;
+    }
+    const d = await comPrazo(docEquipamentos().get(), 20000).catch((e) => { throw falha(e); });
+    if (!d.exists) return null;
+    const x = d.data() || {};
+    return {
+      itens: Array.isArray(x.itens) ? x.itens : [],
+      total: Number(x.total) || 0,
+      atualizado: Number(x.atualizado) || 0,
+      por: String(x.por || ''),
+      pendente: Boolean(d.metadata?.hasPendingWrites),
+    };
+  }
+
+  /**
+   * Grava a lista nova no lugar da antiga. Só a conta principal: a regra do banco recusa as
+   * outras contas, e aqui a recusa vem antes, sem gastar a viagem.
+   */
+  async function salvarListaEquipamentos(itens) {
+    await iniciar();
+    if (!atual()) throw new Error('Entre na sua conta.');
+    const eu = await perfil().catch(() => null);
+    if (!eu?.mestre) {
+      const erro = new Error('Só a conta principal grava a lista de equipamentos.');
+      erro.codigo = 'permission-denied';
+      throw erro;
+    }
+    // só os quatro campos, sempre texto: nada além disso sobe para o banco
+    const lista = (Array.isArray(itens) ? itens : []).slice(0, 1000)
+      .map((x) => Object.fromEntries(CAMPOS_EQUIPAMENTO.map((k) => [k, String(x?.[k] ?? '')])));
+    const dados = {
+      itens: lista,
+      total: lista.length,
+      atualizado: Date.now(),
+      por: String(eu.nome || 'conta principal').slice(0, 120),
+    };
+    const gravacao = docEquipamentos().set(dados);
+    try {
+      await comPrazo(gravacao, 30000);
+    } catch (e) {
+      const erro = falha(e);
+      // estourou o prazo, mas a gravação não foi cancelada: o Firestore guarda na fila do
+      // aparelho e manda quando o sinal voltar (revisão de 25/11/2026). Quem chamou acompanha
+      // por `naFila`, que resolve com a lista quando ela chegar ao banco. Nunca apagar a fila
+      // (clearPersistence): os RDOs que esperam sinal iriam junto.
+      if (erro.codigo === 'deadline-exceeded') {
+        erro.naFila = gravacao.then(() => dados, (e2) => { throw falha(e2); });
+        erro.naFila.catch(() => {}); // quem chamou trata; aqui só não deixa a recusa solta
+      }
+      throw erro;
+    }
+    return dados;
+  }
+
   return {
     configurado, emulador: EMULADOR, iniciar, aoMudar, atual,
     perfil, cadastrar, entrar, sair, esqueci, trocarSenha, salvarPerfil, mestre,
     publicar, publicarComo, meusRdos, umRdo, todos, usuarios, sessaoPronta, fotosDe, apagar, idDoc,
     marcarFotosNoBanco, esquecerFotos,
+    listaEquipamentos, salvarListaEquipamentos,
     MESTRE,
   };
 })();

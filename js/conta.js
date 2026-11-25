@@ -605,6 +605,11 @@ window.Conta = (() => {
     const deuCerto = !resultado.erro && !resultado.semRede && !resultado.ocupado && !resultado.semSessao;
     if (deuCerto) {
       try { localStorage.setItem(chaveDe(CHAVE_ULTIMA), String(Date.now())); } catch { /* sem espaço */ }
+      // lista de equipamentos do cliente (js/equipamentos.js): pergunta ao banco no máximo a
+      // cada 6 h; chegou versão nova, a tela de Equipamentos já mostra a lista
+      window.Equipamentos?.atualizar?.()
+        .then((r) => { if (r?.mudou) window.__rdo?.app?.renderSeguro?.(); })
+        .catch(() => {});
     }
     atualizarStatus();
     // chegou RDO novo ou versão nova: as listas na tela ficam em dia (sem atropelar quem digita)

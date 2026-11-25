@@ -38,6 +38,7 @@ window.Screens = (() => {
     controle: 'Controle de RDO',
     analise: 'Análise dos RDOs',
     galeria: 'Galeria de fotos',
+    equipamentos: 'Lista de Equipamentos',
     sair: 'Sair da conta',
   };
 
@@ -185,6 +186,7 @@ window.Screens = (() => {
           ${window.Conta?.ehMestre?.() ? `<button class="action-card" data-go="month">${icon('chart')}Resumo do Mês</button>` : ''}
           ${window.Conta?.ehMestre?.() ? `<button class="action-card" data-act="controle-aba">${icon('clipboard')}Controle de RDO</button>` : ''}
           ${window.Conta?.ehMestre?.() ? `<button class="action-card wide" data-go="equipe">${icon('users', 20)}RDOs da Equipe</button>` : ''}
+          ${window.Conta?.ehMestre?.() && window.Equipamentos ? `<button class="action-card wide" data-go="equipamentos">${icon('truck', 20)}Lista de Equipamentos</button>` : ''}
           <button class="action-card wide neutro-card" data-act="atualizar-app">${icon('refresh', 20)}Atualizar o app<span class="sub-card" data-versao-app></span></button>
           <button class="action-card wide neutro-card" data-go="backup">${icon('shield', 20)}Cópia de Segurança</button>
           <button class="action-card wide neutro-card" data-go="conta">${icon('lock', 20)}Minha Conta</button>
@@ -675,49 +677,110 @@ window.Screens = (() => {
   // -------------------------------------------------------------- equipamentos
 
   function equipment(rdo) {
-    const badge = (s) => (s === 'Operando' ? 'green' : s === 'Manutenção' ? 'amber' : 'red');
+    // sem status (veio da lista do cliente e ninguém informou ainda): selo cinza
+    const badge = (s) => (!s ? 'gray' : s === 'Operando' ? 'green' : s === 'Manutenção' ? 'amber' : 'red');
     // o valor vai para o HTML da tela: passa pelo esc() como todo dado do RDO
     const horas = (v) => (v == null || v === '' ? '—' : `${esc(String(v).replace('.', ','))}h`);
     const trava = travado(rdo);
-    // mesma folha para adicionar e para corrigir (toque no nome); horímetro em branco
+    // lista de equipamentos do cliente guardada no aparelho (js/equipamentos.js); sem ela, tudo digitado
+    const lista = window.Equipamentos?.lista?.() || null;
+    // veio da lista do cliente: marca `lista` e TAG em `code` (js/equipamentos.js). O código antigo
+    // "Código / patrimônio" (até a v19) também fica em `code`, sem a marca: é digitado, com nome
+    // editável e status obrigatório (revisão de 25/11/2026)
+    const daLista = (e) => Boolean(e?.lista) && Boolean(String(e?.code || '').trim());
+    // mesma folha para adicionar e para corrigir (toque no nome); horímetro em branco.
+    // Equipamento que veio da lista não muda de nome: o nome e a TAG andam juntos.
     const campos = (e = {}) => [
-      { key: 'name', label: 'Equipamento', placeholder: 'Nome do equipamento', value: e.name },
+      { key: 'name', label: daLista(e) ? `Equipamento (TAG ${e.code})` : 'Equipamento', placeholder: 'Nome do equipamento', value: e.name, readonly: daLista(e) },
       { key: 'status', label: 'Status', type: 'select', options: [{ value: '', label: 'Selecione' }, 'Operando', 'Parado', 'Manutenção'], value: e.status },
       { key: 'hoursStart', label: 'Horímetro inicial', type: 'number', placeholder: 'Horímetro inicial', value: e.hoursStart ?? '' },
       { key: 'hoursEnd', label: 'Horímetro final', type: 'number', placeholder: 'Horímetro final', value: e.hoursEnd ?? '' },
     ];
     const horimetro = (v) => (v === '' ? null : Math.max(0, Number(v) || 0));
-    const ler = (valores) => {
-      if (!valores.name) { toast('Informe o equipamento.'); return null; }
-      if (!valores.status) { toast('Informe o status do equipamento.'); return null; }
+    // `base`: o equipamento que está sendo corrigido; o código dele (code) e a marca da lista ficam
+    // guardados. O da lista pode ficar sem status: a folha já fechou, e o horímetro digitado não se perde.
+    const ler = (valores, base = {}) => {
+      const fixo = daLista(base);
+      const nome = fixo ? String(base.name || '') : valores.name;
+      if (!nome) { toast('Informe o equipamento.'); return null; }
+      if (!valores.status && !fixo) { toast('Informe o status do equipamento.'); return null; }
       return {
-        name: valores.name,
-        status: valores.status,
+        name: nome,
+        ...(base.code ? { code: base.code } : {}),
+        ...(fixo ? { lista: true } : {}),
+        status: valores.status || '',
         hoursStart: horimetro(valores.hoursStart),
         hoursEnd: horimetro(valores.hoursEnd),
       };
     };
+    // já está no RDO? O da lista, pela TAG ou pelo nome de um digitado; o digitado (mesmo com o
+    // código antigo), pelo nome. Dois da lista com o mesmo nome e TAG diferente são dois equipamentos.
+    const jaNoRdo = (doRdo) => {
+      const tagDe = (x) => (daLista(x) ? String(x.code).trim().toUpperCase() : '');
+      const nomeDe = (x) => String(x?.name || '').trim().toLowerCase();
+      const tags = new Set(doRdo.map(tagDe).filter(Boolean));
+      const nomes = new Set(doRdo.map(nomeDe).filter(Boolean));
+      const digitados = new Set(doRdo.filter((x) => !tagDe(x)).map(nomeDe).filter(Boolean));
+      return (x) => {
+        const tag = tagDe(x);
+        return tag ? tags.has(tag) || digitados.has(nomeDe(x)) : nomes.has(nomeDe(x));
+      };
+    };
+    const botoes = lista
+      ? `<button class="btn primary block" data-act="lista">${icon('truck', 16)}Escolher da lista</button>
+         <button class="btn ghost block" data-act="add">${icon('plus', 16)}Digitar outro</button>`
+      : `<button class="btn primary block" data-act="add">${icon('plus', 16)}Equipamento</button>`;
     return {
       titulo: TITULOS.equipment,
       html: `
-        ${trava ? avisoTravado(rdo) : `<button class="btn primary block" data-act="add">${icon('plus', 16)}Equipamento</button>`}
+        ${trava ? avisoTravado(rdo) : botoes}
         ${botaoCopiar(rdo, 'equipmentList', 'os equipamentos')}
         ${rdo.equipmentList.length === 0
-          ? '<div class="empty-state">Nenhum equipamento no relatório.<br>Toque em <strong>Equipamento</strong> para incluir.</div>'
+          ? `<div class="empty-state">Nenhum equipamento no relatório.<br>${lista
+            ? 'Toque em <strong>Escolher da lista</strong> e marque os equipamentos.'
+            : 'Toque em <strong>Equipamento</strong> para incluir.'}</div>`
           : rdo.equipmentList.map((e, i) => `
             <div class="card">
               <button class="body editar" data-editar="${i}"${trava ? ' disabled' : ''}>
                 <div class="name">${esc(e.name)}</div>
-                <div class="sub">horímetro ${horas(e.hoursStart)} → ${horas(e.hoursEnd)}</div>
+                <div class="sub">${e.code && e.code !== e.name ? `${esc(e.code)} · ` : ''}${e.status || trava || e.hoursStart != null || e.hoursEnd != null
+                  ? `horímetro ${horas(e.hoursStart)} → ${horas(e.hoursEnd)}`
+                  : 'toque para informar status e horímetro'}</div>
               </button>
-              <span class="badge ${badge(e.status)}">${esc(e.status)}</span>
+              <span class="badge ${badge(e.status)}">${esc(e.status || 'Sem status')}</span>
               ${trava ? '' : `<button class="del" data-del="${i}" aria-label="Remover">${icon('trash', 17)}</button>`}
             </div>`).join('')}
-        ${rdo.equipmentList.length && !trava ? '<p class="dica">Toque no equipamento para corrigir ou digitar o horímetro.</p>' : ''}`,
+        ${rdo.equipmentList.length && !trava ? '<p class="dica">Toque no equipamento para informar o status, corrigir ou digitar o horímetro.</p>' : ''}`,
       bind(root) {
         if (trava) return;
+
+        // escolher da lista do cliente: marca vários de uma vez; entram sem status e sem horímetro
+        root.querySelector('[data-act="lista"]')?.addEventListener('click', async () => {
+          const atual = window.Equipamentos?.lista?.();
+          if (!atual) { toast('A lista de equipamentos não está neste aparelho.'); app.render(); return; }
+          const valores = await sheet({
+            title: 'Escolher equipamentos',
+            text: 'Marque os equipamentos do RDO. Depois toque em cada um para informar o status e o horímetro.',
+            fields: [{
+              key: 'tags', type: 'checks', busca: true, placeholderBusca: 'Buscar por frota, modelo ou TAG',
+              grupos: window.Equipamentos.grupos(atual.itens, rdo.equipmentList),
+            }],
+            submit: 'Adicionar marcados',
+          });
+          if (!valores?.tags?.length) return;
+          let n = 0;
+          if (!gravar(rdo, (d) => {
+            // confere de novo contra o RDO gravado: nada entra duas vezes
+            const novos = window.Equipamentos.escolhidos(valores.tags, atual.itens, d.equipmentList);
+            novos.forEach((x) => d.equipmentList.push(x));
+            n = novos.length;
+          })) return;
+          toast(n ? `${n} equipamento(s) adicionado(s).` : 'Esses equipamentos já estão no RDO.');
+          app.render();
+        });
+
         root.querySelector('[data-act="add"]').addEventListener('click', async () => {
-          // tudo digitado: sem cadastro de equipamentos, status e horímetro em branco
+          // equipamento fora da lista (ou aparelho sem lista): digitado, status e horímetro na mesma folha
           const valores = await sheet({ title: 'Equipamento', fields: campos(), submit: 'Adicionar' });
           const item = valores && ler(valores);
           if (!item) return;
@@ -729,8 +792,14 @@ window.Screens = (() => {
         root.querySelectorAll('[data-editar]').forEach((b) => {
           b.addEventListener('click', async () => {
             const i = Number(b.dataset.editar);
-            const valores = await sheet({ title: 'Corrigir equipamento', fields: campos(rdo.equipmentList[i]), submit: 'Salvar' });
-            const item = valores && ler(valores);
+            const base = rdo.equipmentList[i];
+            if (!base) return;
+            const valores = await sheet({
+              title: base.status ? 'Corrigir equipamento' : 'Status e horímetro',
+              fields: campos(base),
+              submit: 'Salvar',
+            });
+            const item = valores && ler(valores, base);
             if (!item) return;
             if (!gravar(rdo, (d) => { d.equipmentList[i] = item; })) return;
             app.render();
@@ -740,14 +809,22 @@ window.Screens = (() => {
         root.querySelector('[data-act="copiar-anterior"]')?.addEventListener('click', async (e) => {
           const origem = Store.find(e.currentTarget.dataset.de);
           if (!origem) return;
-          const ja = new Set(rdo.equipmentList.map((x) => x.name.toLowerCase()));
-          const novos = origem.equipmentList.filter((x) => !ja.has(x.name.toLowerCase()));
+          const ja = jaNoRdo(rdo.equipmentList);
+          const novos = origem.equipmentList.filter((x) => x && !ja(x));
           if (!novos.length) { toast('Esses equipamentos já estão no RDO.'); return; }
           const ok = await confirmar('Copiar equipamentos',
             `Copiar ${novos.length} equipamento(s) do RDO ${origem.number} (${fmtDate(origem.date)})? O horímetro fica em branco para você digitar.`, 'Copiar');
           if (!ok) return;
           if (!gravar(rdo, (d) => {
-            novos.forEach((x) => d.equipmentList.push({ name: x.name, status: x.status, hoursStart: null, hoursEnd: null }));
+            // o da lista leva a TAG e a marca; o código antigo "Código / patrimônio" não vem junto,
+            // como na v53 (levar ou não é decisão do dono)
+            novos.forEach((x) => d.equipmentList.push({
+              name: String(x.name || ''),
+              ...(daLista(x) ? { code: String(x.code), lista: true } : {}),
+              status: x.status || '',
+              hoursStart: null,
+              hoursEnd: null,
+            }));
           })) return;
           toast(`${novos.length} equipamento(s) copiado(s).`);
           app.render();
@@ -1842,10 +1919,13 @@ window.Screens = (() => {
   const galeria = (rdo) => (window.Galeria && window.Conta?.ehMestre?.() ? window.Galeria.tela(app) : home(rdo));
   const analise = (rdo) => (window.Analise && window.Conta?.ehMestre?.() ? window.Analise.tela(app) : home(rdo));
 
+  // importar a planilha das máquinas (pedido de 24/11/2026), só da conta principal
+  const equipamentos = (rdo) => (window.Equipamentos && window.Conta?.ehMestre?.() ? window.Equipamentos.tela(app) : home(rdo));
+
   // página de sair (pedido de 10/11/2026): confirma e leva para a tela de entrar
   const sair = () => window.Conta.telaSair();
 
-  const mapa = { home, header, etapas, workforce, equipment, tasks, occurrences, stops, photos, report, reports, backup, month, roster, conta, equipe, controle, analise, galeria, sair };
+  const mapa = { home, header, etapas, workforce, equipment, tasks, occurrences, stops, photos, report, reports, backup, month, roster, conta, equipe, controle, analise, galeria, equipamentos, sair };
 
   return {
     boot(appRef) { app = appRef; },
@@ -1855,6 +1935,10 @@ window.Screens = (() => {
       if (tela === 'equipe' || tela === 'controle') window.Mestre?.aoEntrar?.(tela);
       if (tela === 'analise') window.Analise?.aoEntrar?.();
       if (tela === 'galeria') window.Galeria?.aoEntrar?.();
+      // lista de equipamentos: sem lista no aparelho, pergunta ao banco (no máximo a cada 10 min)
+      if (tela === 'equipment' || tela === 'equipamentos') {
+        window.Equipamentos?.atualizar?.().then((r) => { if (r?.mudou) app?.renderSeguro?.(); });
+      }
     },
     TITULOS,
     tiposDesvio,

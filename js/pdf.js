@@ -265,7 +265,9 @@ window.Pdf = (() => {
     (rdo.equipmentList || []).forEach((e, i) => {
       const horas = [e.hoursStart, e.hoursEnd].some((v) => v != null && v !== '')
         ? `horímetro ${[e.hoursStart, e.hoursEnd].map((v) => (v == null || v === '' ? '?' : `${v}h`)).join(' a ')}` : '';
-      const texto = [e.name, e.code, e.status, horas].filter(Boolean).join(' — ');
+      // sem modelo, o nome do equipamento da lista já é a TAG: ela não sai duas vezes
+      const tag = e.code && e.code !== e.name ? e.code : '';
+      const texto = [e.name, tag, e.status, horas].filter(Boolean).join(' — ');
       if (texto) partes.push([`Equipamento ${i + 1}`, texto]);
     });
     const paradas = rdo.stoppages || [];

@@ -68,7 +68,10 @@ window.Whatsapp = (() => {
       rdo.equipmentList.forEach((e) => {
         const horas = Math.max(0, (Number(e.hoursEnd) || 0) - (Number(e.hoursStart) || 0));
         const horimetro = e.hoursStart || e.hoursEnd ? ` · ${e.hoursStart ?? 0}h→${e.hoursEnd ?? 0}h (${horas}h)` : '';
-        partes.push(`• ${e.name}${e.code ? ` (${e.code})` : ''} — ${e.status}${horimetro}`);
+        // equipamento escolhido da lista ainda sem status: sai sem o travessão vazio. Sem modelo,
+        // o nome já é a TAG: ela não sai duas vezes.
+        const tag = e.code && e.code !== e.name ? ` (${e.code})` : '';
+        partes.push(`• ${e.name}${tag}${e.status ? ` — ${e.status}` : ''}${horimetro}`);
       });
     }
 
