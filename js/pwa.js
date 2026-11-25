@@ -10,7 +10,7 @@ window.Pwa = (() => {
   const ouvintes = [];
 
   // versão do código deste build; subir junto com o versionName do Gradle e com VERSAO do sw.js
-  const VERSAO_APP = '1.13';
+  const VERSAO_APP = '1.14';
   const APK_URL = 'https://github.com/deividmarcio0610-tech/gps-rdo/releases/latest/download/GPS-RDO.apk';
   const NATIVO = () => Boolean(window.Capacitor?.isNativePlatform?.());
 
@@ -165,12 +165,19 @@ window.Pwa = (() => {
    * uma vez, na primeira abertura depois que a versão nova entra (no navegador, na tela de
    * início ou no APK). Ao publicar uma versão com novidade, acrescente uma linha aqui.
    */
+  // A v53 leva a v52 ao APK 1.14 e repete as novidades dela: a v52 ficou poucos minutos no
+  // ar, e quem abre o app pula da v51 direto para a v53 (o aviso mostra só a versão que entrou).
+  const NOVIDADES_V52 = [
+    'Ocorrências agora se chamam Desvios, com os tipos Alteração na programação, Falta de material, Falta de mão de obra, Falta de tempo, Falta ou atraso de documento, Equipamento, Clima e Outro. Toque no desvio para corrigir.',
+    'Relatório de Campo: bloco DESVIOS DO DIA logo depois do cabeçalho. No RDO Final os desvios vêm primeiro nas observações, e o resumo do WhatsApp também começa por eles.',
+    'Foto da câmera: o PDF espera a foto que ainda está entrando, para ela não ficar fora do Relatório de Campo.',
+  ];
   const NOVIDADES = {
-    v52: [
-      'Ocorrências agora se chamam Desvios, com os tipos Alteração na programação, Falta de material, Falta de mão de obra, Falta de tempo, Falta ou atraso de documento, Equipamento, Clima e Outro. Toque no desvio para corrigir.',
-      'Relatório de Campo: bloco DESVIOS DO DIA logo depois do cabeçalho. No RDO Final os desvios vêm primeiro nas observações, e o resumo do WhatsApp também começa por eles.',
-      'Foto da câmera: o PDF espera a foto que ainda está entrando, para ela não ficar fora do Relatório de Campo.',
+    v53: [
+      'APK 1.14: traz tudo da v50 à v52 (Envio Rápido ao Supervisor, Desvios, foto da câmera no Relatório de Campo).',
+      ...NOVIDADES_V52,
     ],
+    v52: [...NOVIDADES_V52],
     v50: [
       'Colaborador: quadradinho Envio Rápido ao Supervisor sobe o RDO para o banco e abre o resumo no WhatsApp do supervisor (o número fica guardado). Na conta principal o envio pelo WhatsApp segue em RDOs da Equipe, no relatório do dia ou do período.',
     ],
