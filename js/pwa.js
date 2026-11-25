@@ -166,6 +166,11 @@ window.Pwa = (() => {
    * início ou no APK). Ao publicar uma versão com novidade, acrescente uma linha aqui.
    */
   const NOVIDADES = {
+    v52: [
+      'Ocorrências agora se chamam Desvios, com os tipos Alteração na programação, Falta de material, Falta de mão de obra, Falta de tempo, Falta ou atraso de documento, Equipamento, Clima e Outro. Toque no desvio para corrigir.',
+      'Relatório de Campo: bloco DESVIOS DO DIA logo depois do cabeçalho. No RDO Final os desvios vêm primeiro nas observações, e o resumo do WhatsApp também começa por eles.',
+      'Foto da câmera: o PDF espera a foto que ainda está entrando, para ela não ficar fora do Relatório de Campo.',
+    ],
     v50: [
       'Colaborador: quadradinho Envio Rápido ao Supervisor sobe o RDO para o banco e abre o resumo no WhatsApp do supervisor (o número fica guardado). Na conta principal o envio pelo WhatsApp segue em RDOs da Equipe, no relatório do dia ou do período.',
     ],

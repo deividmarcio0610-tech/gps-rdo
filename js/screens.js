@@ -25,7 +25,7 @@ window.Screens = (() => {
     workforce: 'Mão de Obra',
     equipment: 'Equipamentos',
     tasks: 'Tarefas Realizadas',
-    occurrences: 'Ocorrências',
+    occurrences: 'Desvios',
     photos: 'Fotos do RDO',
     report: 'Gerar Relatório',
     reports: 'Apagar Relatórios',
@@ -174,7 +174,7 @@ window.Screens = (() => {
           <button class="action-card" data-go="workforce">${icon('users')}Mão de Obra${contagem('workforce')}</button>
           <button class="action-card" data-go="equipment">${icon('truck')}Equipamentos${contagem('equipmentList')}</button>
           <button class="action-card" data-go="tasks">${icon('clipboard')}Tarefas Realizadas${contagem('tasks')}</button>
-          <button class="action-card" data-go="occurrences">${icon('alert')}Ocorrências${contagem('occurrences')}</button>
+          <button class="action-card" data-go="occurrences">${icon('alert')}Desvios${contagem('occurrences')}</button>
           <button class="action-card" data-go="photos">${icon('camera')}Fotos do RDO${contagem('photos')}</button>
           ${window.Conta?.ehMestre?.() ? `<button class="action-card" data-go="galeria">${icon('image')}Galeria de Fotos</button>` : ''}
           ${window.Conta?.ehMestre?.() ? `<button class="action-card" data-go="analise">${icon('chart')}Análise dos RDOs</button>` : ''}
@@ -901,55 +901,72 @@ window.Screens = (() => {
     };
   }
 
-  // -------------------------------------------------------------- ocorrências
+  // -------------------------------------------------------------- ocorrências (agora Desvios)
+  // Pedido de 24/11/2026: "Ocorrências" viraram "Desvios" em toda a interface. O dado continua
+  // em rdo.occurrences, sem migração. "Segurança" saiu da lista; desvio antigo com esse tipo
+  // (ou outro fora da lista) continua aparecendo e, na correção, o tipo dele vira opção.
+  const TIPOS_DESVIO = ['Alteração na programação', 'Falta de material', 'Falta de mão de obra', 'Falta de tempo',
+    'Falta ou atraso de documento', 'Equipamento', 'Clima', 'Outro'];
+  function tiposDesvio(atual = '') {
+    return atual && !TIPOS_DESVIO.includes(atual) ? [...TIPOS_DESVIO, atual] : TIPOS_DESVIO.slice();
+  }
 
   function occurrences(rdo) {
+    const trava = travado(rdo);
+    // mesma folha para registrar e para corrigir (toque no desvio)
+    const campos = (o = {}) => [
+      { key: 'type', label: 'Tipo', type: 'select', options: [{ value: '', label: 'Selecione' }, ...tiposDesvio(o.type)], value: o.type || '' },
+      { key: 'description', label: 'Descrição', type: 'textarea', placeholder: 'O que aconteceu', value: o.description || '' },
+      { key: 'time', label: 'Hora', type: 'time', value: o.time || '' },
+      { key: 'location', label: 'Local', placeholder: 'Onde aconteceu', value: o.location || '' },
+    ];
+    const ler = (valores) => {
+      if (!valores.type) { toast('Informe o tipo do desvio.'); return null; }
+      const desc = String(valores.description || '').trim();
+      if (!desc) { toast('Informe a descrição do desvio.'); return null; }
+      return { type: valores.type, description: desc, time: valores.time || '', location: valores.location || '' };
+    };
     return {
       titulo: TITULOS.occurrences,
       html: `
-        ${travado(rdo) ? avisoTravado(rdo) : `<button class="btn danger block" data-act="add">${icon('plus', 16)}Registrar Ocorrência</button>`}
+        ${trava ? avisoTravado(rdo) : `<button class="btn danger block" data-act="add">${icon('plus', 16)}Registrar Desvio</button>`}
         ${rdo.occurrences.length === 0
-          ? '<div class="empty-state">Nenhuma ocorrência registrada.</div>'
+          ? '<div class="empty-state">Nenhum desvio registrado.</div>'
           : rdo.occurrences.map((o, i) => `
             <div class="card">
-              <div class="body">
+              <button class="body editar" data-editar="${i}"${trava ? ' disabled' : ''}>
                 <div class="name">${esc(o.description)}</div>
                 <div class="sub">${esc([o.time, o.location].filter(Boolean).join(' · ') || '—')}</div>
-              </div>
+              </button>
               <span class="badge red">${esc(o.type || '—')}</span>
-              ${travado(rdo) ? '' : `<button class="del" data-del="${i}" aria-label="Remover">${icon('trash', 17)}</button>`}
-            </div>`).join('')}`,
+              ${trava ? '' : `<button class="del" data-del="${i}" aria-label="Remover">${icon('trash', 17)}</button>`}
+            </div>`).join('')}
+        ${rdo.occurrences.length && !trava ? '<p class="dica">Toque no desvio para corrigir.</p>' : ''}`,
       bind(root) {
+        if (trava) return;
         root.querySelector('[data-act="add"]')?.addEventListener('click', async () => {
-          const valores = await sheet({
-            title: 'Registrar Ocorrência',
-            fields: [
-              { key: 'type', label: 'Tipo', type: 'select', options: [{ value: '', label: 'Selecione' }, 'Segurança', 'Equipamento', 'Clima', 'Outros'] },
-              { key: 'description', label: 'Descrição', type: 'textarea', placeholder: 'O que aconteceu' },
-              { key: 'time', label: 'Hora', type: 'time' },
-              { key: 'location', label: 'Local', placeholder: 'Onde aconteceu' },
-            ],
-            submit: 'Registrar',
-          });
-          if (!valores) return;
-          if (!valores.type) { toast('Informe o tipo da ocorrência.'); return; }
-          const desc = String(valores.description || '').trim();
-          if (!desc) { toast('Informe a descrição da ocorrência.'); return; }
-          if (!gravar(rdo, (d) => {
-            d.occurrences.push({
-              type: valores.type,
-              description: desc,
-              time: valores.time || '',
-              location: valores.location || '',
-            });
-          })) return;
-          toast('Ocorrência registrada.');
+          const valores = await sheet({ title: 'Registrar Desvio', fields: campos(), submit: 'Registrar' });
+          const item = valores && ler(valores);
+          if (!item) return;
+          if (!gravar(rdo, (d) => { d.occurrences.push(item); })) return;
+          toast('Desvio registrado.');
           app.render();
+        });
+
+        root.querySelectorAll('[data-editar]').forEach((b) => {
+          b.addEventListener('click', async () => {
+            const i = Number(b.dataset.editar);
+            const valores = await sheet({ title: 'Corrigir desvio', fields: campos(rdo.occurrences[i]), submit: 'Salvar' });
+            const item = valores && ler(valores);
+            if (!item) return;
+            if (!gravar(rdo, (d) => { d.occurrences[i] = { ...d.occurrences[i], ...item }; })) return;
+            app.render();
+          });
         });
 
         root.querySelectorAll('[data-del]').forEach((b) => {
           b.addEventListener('click', async () => {
-            const ok = await confirmar('Remover ocorrência', 'Remover esta ocorrência?');
+            const ok = await confirmar('Remover desvio', 'Remover este desvio?');
             if (!ok) return;
             if (!gravar(rdo, (d) => { d.occurrences.splice(Number(b.dataset.del), 1); })) return;
             app.render();
@@ -1066,6 +1083,19 @@ window.Screens = (() => {
 
         async function anexar(arquivos, daCamera) {
           if (!arquivos.length) return;
+          // GPS só para foto tirada agora; a da galeria pode ter sido feita em outro lugar.
+          // Pedido junto com a folha da descrição (pedido de 24/11/2026): antes ele só começava
+          // depois da folha, e a foto da câmera ficava até 6 s fora do RDO, sem aviso; o PDF
+          // gerado nessa janela saía sem ela.
+          const gps = daCamera && navigator.geolocation
+            ? new Promise((resolve) => {
+              navigator.geolocation.getCurrentPosition(
+                (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+                () => resolve(null),
+                { enableHighAccuracy: true, timeout: 6000, maximumAge: 60000 },
+              );
+            })
+            : Promise.resolve(null);
           const desc = await sheet({
             title: arquivos.length > 1 ? `Descrição das ${arquivos.length} fotos` : 'Descrição da foto',
             fields: [
@@ -1080,22 +1110,23 @@ window.Screens = (() => {
             submit: 'Anexar',
           });
           if (desc === null) return;
+          // daqui até a foto entrar no RDO, os botões do PDF esperam (rdoAtual)
+          anexosPendentes += 1;
+          try {
+            await guardarFotos(arquivos, daCamera, desc, gps);
+          } finally {
+            fimDoAnexo();
+          }
+          app.render();
+        }
+
+        async function guardarFotos(arquivos, daCamera, desc, gps) {
+          toast(arquivos.length > 1 ? `Anexando ${arquivos.length} fotos...` : 'Anexando a foto...');
           const tarefa = desc.atividade !== undefined && desc.atividade !== '' ? rdo.tasks[Number(desc.atividade)] : null;
           const atividade = tarefa ? { os: tarefa.os || '', tag: tarefa.tag || '', descricao: tarefa.description || '' } : null;
+          // o pedido de permissão do GPS não tem prazo no navegador: a foto não fica presa nele
+          const coords = await Promise.race([gps, new Promise((resolve) => { setTimeout(() => resolve(null), 8000); })]);
 
-          // GPS só para foto tirada agora; a da galeria pode ter sido feita em outro lugar
-          let coords = null;
-          if (daCamera && navigator.geolocation) {
-            coords = await new Promise((resolve) => {
-              navigator.geolocation.getCurrentPosition(
-                (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
-                () => resolve(null),
-                { enableHighAccuracy: true, timeout: 6000, maximumAge: 60000 },
-              );
-            });
-          }
-
-          toast(arquivos.length > 1 ? `Anexando ${arquivos.length} fotos...` : 'Anexando a foto...');
           let anexadas = 0;
           let falhas = 0;
           for (const arquivo of arquivos) {
@@ -1131,7 +1162,6 @@ window.Screens = (() => {
           if (falhas && !anexadas) toast('Não foi possível anexar a foto. Apague relatórios antigos e tente de novo.');
           else if (falhas) toast(`${anexadas} foto(s) anexada(s); ${falhas} não entraram.`);
           else toast(anexadas > 1 ? `${anexadas} fotos anexadas.` : 'Foto anexada.');
-          app.render();
         }
 
         camera.addEventListener('change', () => {
@@ -1180,6 +1210,30 @@ window.Screens = (() => {
       ${filtroHtml()}
       <div id="lista-rdo">${listaRdoHtml(atualId)}</div>
     </div>`;
+
+  // Foto ainda entrando (GPS, redução e gravação): os botões do PDF esperam por ela, para o
+  // Relatório de Campo não sair sem a foto que acabou de ser tirada (pedido de 24/11/2026).
+  let anexosPendentes = 0;
+  let esperandoAnexos = [];
+  const PRAZO_DOS_ANEXOS = 15000;
+  function fimDoAnexo() {
+    anexosPendentes = Math.max(0, anexosPendentes - 1);
+    if (anexosPendentes) return;
+    const fila = esperandoAnexos;
+    esperandoAnexos = [];
+    fila.forEach((avisar) => avisar());
+  }
+  /** O RDO como está agora no aparelho, depois de entrar a foto que estava sendo anexada. */
+  async function rdoAtual(rdo) {
+    if (anexosPendentes) {
+      toast('Anexando a foto... o PDF sai em seguida.');
+      await new Promise((resolve) => {
+        esperandoAnexos.push(resolve);
+        setTimeout(resolve, PRAZO_DOS_ANEXOS);
+      });
+    }
+    return (rdo?.id && Store.find(rdo.id)) || rdo;
+  }
 
   /*
    * Abas do RDO escolhido no Gerar Relatório (pedido de 10/11/2026): "RDO Final" é a folha
@@ -1256,7 +1310,7 @@ window.Screens = (() => {
           <div class="li"><span class="k">Clima</span><span class="v">${esc(rdo.weather || '—')}</span></div>
           <div class="li"><span class="k">Supervisor</span><span class="v">${esc(rdo.supervisor || '—')}</span></div>
           <div class="li"><span class="k">Horas de equipamento</span><span class="v">${String(Math.round(somaHoras * 10) / 10).replace('.', ',')}h</span></div>
-          <div class="li"><span class="k">Ocorrências</span><span class="v">${rdo.occurrences.length}</span></div>
+          <div class="li"><span class="k">Desvios</span><span class="v">${rdo.occurrences.length}</span></div>
         </div>
 
         <div class="section-label">Editar este RDO</div>
@@ -1266,7 +1320,7 @@ window.Screens = (() => {
           <button class="action-card" data-go="workforce">${icon('users')}Mão de Obra</button>
           <button class="action-card" data-go="equipment">${icon('truck')}Equipamentos</button>
           <button class="action-card" data-go="tasks">${icon('clipboard')}Tarefas Realizadas</button>
-          <button class="action-card" data-go="occurrences">${icon('alert')}Ocorrências</button>
+          <button class="action-card" data-go="occurrences">${icon('alert')}Desvios</button>
           <button class="action-card" data-go="photos">${icon('camera')}Fotos do RDO</button>
         </div>
 
@@ -1302,6 +1356,8 @@ window.Screens = (() => {
           const opcoes = { formato };
           const aba = ABAS_RELATORIO[formato];
           const arquivo = aba.arquivo(rdo);
+          // o RDO na hora do toque, já com a foto que estava entrando
+          const rdoParaPdf = () => rdoAtual(rdo);
 
           painel.querySelector('[data-act="pdf"]').addEventListener('click', async (e) => {
             const btn = e.currentTarget;
@@ -1310,7 +1366,7 @@ window.Screens = (() => {
             const nativo = window.Capacitor?.isNativePlatform?.() === true;
             const janela = nativo ? null : window.open('', '_blank');
             try {
-              const r = await window.Pdf.abrir(rdo, janela, opcoes);
+              const r = await window.Pdf.abrir(await rdoParaPdf(), janela, opcoes);
               if (janela && r !== 'aberto') janela.close();
               if (r === 'aberto') toast(`${arquivo} aberto.`);
               else if (r === 'compartilhado') toast('Escolha o visualizador de PDF no compartilhar do aparelho.');
@@ -1329,8 +1385,10 @@ window.Screens = (() => {
             const btn = e.currentTarget;
             btn.disabled = true;
             try {
-              const r = await window.Pdf.gerar(rdo, opcoes);
-              if (r !== 'cancelado') toast(`${arquivo} gerado${formato === 'campo' && rdo.photos.length ? ` com ${rdo.photos.length} foto(s)` : ''}.`);
+              const atual = await rdoParaPdf();
+              const r = await window.Pdf.gerar(atual, opcoes);
+              const nFotos = (atual.photos || []).length;
+              if (r !== 'cancelado') toast(`${arquivo} gerado${formato === 'campo' && nFotos ? ` com ${nFotos} foto(s)` : ''}.`);
             } catch (err) {
               toast('Não foi possível gerar o PDF.');
             } finally {
@@ -1360,7 +1418,7 @@ window.Screens = (() => {
             btnEnviar.disabled = true;
             rotulo.textContent = 'Montando o PDF...';
             try {
-              const p = await window.Pdf.preparar(rdo, opcoes);
+              const p = await window.Pdf.preparar(await rdoParaPdf(), opcoes);
               if (window.Capacitor?.isNativePlatform?.()) {
                 rotulo.textContent = textoBotao;
                 depois(await p.enviar(legenda));
@@ -1480,7 +1538,7 @@ window.Screens = (() => {
               <div class="body">
                 <div class="name">RDO ${esc(r.number)}</div>
                 <div class="sub">${fmtDate(r.date)} · ${esc(r.location || 'Sem local')}</div>
-                <div class="sub">${r.tasks.length} tarefa(s) · ${r.occurrences.length} ocorrência(s) · ${r.photos.length} foto(s)</div>
+                <div class="sub">${r.tasks.length} tarefa(s) · ${r.occurrences.length} desvio(s) · ${r.photos.length} foto(s)</div>
               </div>
               ${seloTipo(r)}
               <button class="del del-rdo" data-del="${esc(r.id)}" aria-label="Apagar RDO ${esc(r.number)}">${icon('trash', 20)}</button>
@@ -1490,7 +1548,7 @@ window.Screens = (() => {
       titulo: TITULOS.reports,
       html: `
         <div class="aviso-perigo">
-          Apagar um relatório remove cabeçalho, equipe, equipamentos, tarefas, ocorrências e fotos dele.
+          Apagar um relatório remove cabeçalho, equipe, equipamentos, tarefas, desvios e fotos dele.
           <strong>A exclusão é definitiva:</strong> não há lixeira. Baixe o PDF antes, se precisar.
         </div>
         <div class="section-label">${Store.rdos.length} relatório(s) salvo(s) · ${fmtTamanho(Store.tamanho())} de dados (fotos à parte)</div>
@@ -1624,7 +1682,7 @@ window.Screens = (() => {
           <div class="li"><span class="k">Preventiva / Corretiva / Backlog (RDO)</span><span class="v">${r.porTipo.Preventiva} / ${r.porTipo.Corretiva} / ${r.porTipo.Backlog}</span></div>
           <div class="li"><span class="k">Tarefas Prev. / Corr. / Backlog</span><span class="v">${r.tarefasPorTipo.Preventiva} / ${r.tarefasPorTipo.Corretiva} / ${r.tarefasPorTipo.Backlog}</span></div>
           <div class="li"><span class="k">Backlog ainda aberto</span><span class="v">${r.backlogAberto}</span></div>
-          <div class="li"><span class="k">Ocorrências</span><span class="v">${r.ocorrencias}</span></div>
+          <div class="li"><span class="k">Desvios</span><span class="v">${r.ocorrencias}</span></div>
           <div class="li"><span class="k">Finalizados</span><span class="v">${r.finalizados} de ${r.total}</span></div>
         </div>
         <button class="btn primary block" data-act="pdf-mes"${r.total ? '' : ' disabled'}>${icon('download', 18)}<span>PDF do resumo de ${esc(Pdf.nomeMes(mes))}</span></button>
@@ -1799,5 +1857,6 @@ window.Screens = (() => {
       if (tela === 'galeria') window.Galeria?.aoEntrar?.();
     },
     TITULOS,
+    tiposDesvio,
   };
 })();

@@ -9,6 +9,14 @@ window.Whatsapp = (() => {
 
   const linha = (rotulo, valor) => (valor ? `${rotulo}: ${valor}` : null);
 
+  // Desvios no resumo (pedido de 24/11/2026): lista curta para caber no limite de 1400
+  // caracteres; o texto inteiro de cada desvio vai no PDF.
+  const MAX_DESVIOS = 5;
+  const curto = (valor, max) => {
+    const t = String(valor || '').trim().replace(/\s+/g, ' ');
+    return t.length > max ? `${t.slice(0, max - 1).trimEnd()}…` : t;
+  };
+
   /** Texto curto e legível no celular: sem tabelas, com marcadores simples. */
   function resumo(rdo) {
     const partes = [];
@@ -21,6 +29,22 @@ window.Whatsapp = (() => {
     if (rdo.location) partes.push(`Local: ${rdo.location}`);
     if (rdo.startTime || rdo.endTime) partes.push(`Horário: ${rdo.startTime || '—'} às ${rdo.endTime || '—'}`);
     if (rdo.supervisor) partes.push(`Supervisor: ${rdo.supervisor}`);
+
+    // DESVIOS DO DIA logo depois do cabeçalho; o dado continua em rdo.occurrences
+    const desvios = rdo.occurrences || [];
+    partes.push('');
+    if (!desvios.length) {
+      partes.push('*DESVIOS DO DIA*');
+      partes.push('Sem desvios');
+    } else {
+      partes.push(`*DESVIOS DO DIA* (${desvios.length})`);
+      desvios.slice(0, MAX_DESVIOS).forEach((o) => {
+        const quando = [o.time, curto(o.location, 40)].filter(Boolean).join(' · ');
+        partes.push(`• ${o.type || 'Sem tipo'}: ${curto(o.description, 100)}${quando ? ` (${quando})` : ''}`);
+      });
+      const mais = desvios.length - MAX_DESVIOS;
+      if (mais > 0) partes.push(`… e mais ${mais} ${mais > 1 ? 'desvios' : 'desvio'} no PDF do RDO`);
+    }
 
     const presentes = rdo.workforce.filter((w) => w.status === 'Presente');
     if (presentes.length) {
@@ -56,15 +80,6 @@ window.Whatsapp = (() => {
         const etiqueta = t.os ? (/^os\b/i.test(t.os) ? `${t.os} — ` : `OS ${t.os} — `) : '';
         const tipo = t.maintenanceType ? `[${t.maintenanceType}] ` : '';
         partes.push(`• ${tipo}${etiqueta}${t.description} (${Number(t.progress) || 0}%)`);
-      });
-    }
-
-    if (rdo.occurrences.length) {
-      partes.push('');
-      partes.push(`*OCORRÊNCIAS* (${rdo.occurrences.length})`);
-      rdo.occurrences.forEach((o) => {
-        const quando = [o.time, o.location].filter(Boolean).join(' · ');
-        partes.push(`• ${o.type}: ${o.description}${quando ? ` (${quando})` : ''}`);
       });
     }
 

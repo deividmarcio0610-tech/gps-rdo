@@ -62,7 +62,8 @@ window.Analise = (() => {
       const ts = (r.tasks || []).map((t) => ({ ...base, os: t.os || '', tag: t.tag || '', descricao: t.description || '', tipo: t.maintenanceType || r.maintenanceType || '', area: t.area || '', execucao: pct(t.progress), chave: chaveTarefa(t) }));
       const eqs = (r.equipmentList || []).map((e) => ({ ...base, equipamento: e.name || '', status: e.status || 'Sem status', horimetroIni: e.hoursStart ?? '', horimetroFim: e.hoursEnd ?? '' }));
       const ps = (r.stoppages || []).map((p) => ({ ...base, inicio: p.start || '', fim: p.end || '', motivo: p.reason || 'Sem motivo', obs: p.note || '', minutos: Store.minutosParada(p) }));
-      const ocs = (r.occurrences || []).map((o) => ({ ...base, tipo: o.type || 'Sem tipo', descricao: o.description || '', hora: o.time || '' }));
+      // desvios (pedido de 24/11/2026: "Ocorrências" viraram "Desvios"; o dado continua em occurrences)
+      const ocs = (r.occurrences || []).map((o) => ({ ...base, tipo: o.type || 'Sem tipo', descricao: o.description || '', hora: o.time || '', onde: o.location || '' }));
       (r.workforce || []).forEach((w) => {
         if (!w || !String(w.name || '').trim() || w.status === 'Falta') return;
         maoDeObra.push({ ...base, nome: String(w.name).trim(), funcao: String(w.role || '').trim(), equipe: String(w.team || '').trim(), horas: w.hours || '' });
@@ -259,7 +260,7 @@ window.Analise = (() => {
     if (a.maoDoDia.length) {
       t.push({ texto: `Mão de obra ${fmtDate(a.diaMaoDeObra).slice(0, 5)}: ${a.maoDoDia.length} pres. · + em ${a.maoPorLocal[0][0]} (${a.maoPorLocal[0][1]})` });
     }
-    if (a.ocorrencias.length) t.push({ texto: `Ocorrências: ${a.ocorrencias.length}${a.ocorrenciasPorTipo[0] ? ` · + comum: ${a.ocorrenciasPorTipo[0][0]}` : ''}` });
+    if (a.ocorrencias.length) t.push({ texto: `Desvios: ${a.ocorrencias.length}${a.ocorrenciasPorTipo[0] ? ` · + comum: ${a.ocorrenciasPorTipo[0][0]}` : ''}` });
     if (a.pessoas[0]) t.push({ texto: `Mais RDOs: ${a.pessoas[0].pessoa} (${a.pessoas[0].rdos})` });
     return t;
   }
@@ -297,7 +298,7 @@ window.Analise = (() => {
       });
       y = doc.lastAutoTable.finalY;
     };
-    tab('Números', ['RDOs', 'Pessoas', 'Exec.', 'Andam.', 'Não inic.', 'Exec. méd.', 'Eq. par.', 'Manut.', 'H. par.', 'Ocorr.'],
+    tab('Números', ['RDOs', 'Pessoas', 'Exec.', 'Andam.', 'Não inic.', 'Exec. méd.', 'Eq. par.', 'Manut.', 'H. par.', 'Desv.'],
       [[a.rdos.length, a.pessoas.length, a.executadas.length, a.emAndamento.length, a.naoIniciadas.length, `${a.mediaExecucao}%`,
         a.equipParados.length, a.equipManutencao.length, h(a.minParados), a.ocorrencias.length]]);
     tab('Ativ. mais rotineiras', ['Atividade', 'Vezes'], a.atividades.map(([k, v]) => [k, v]), 8);
@@ -356,7 +357,7 @@ window.Analise = (() => {
           ${cartao('Em manut.', a.equipManutencao.length, 'amber')}
           ${cartao('Operando', a.equipOperando.length, 'green')}
           ${cartao('H. paradas', h(a.minParados), 'red', `${a.paradas.length} parada(s)`)}
-          ${cartao('Ocorrências', a.ocorrencias.length)}
+          ${cartao('Desvios', a.ocorrencias.length)}
           ${cartao('Dias c/ RDO', a.dias.length)}
         </div>
         <div class="btn-row">
@@ -380,7 +381,7 @@ window.Analise = (() => {
         ${rosca('Tipo de manut.', a.porTipo.map(([k, v]) => [k || '(não inf.)', v]), 'tarefas')}
         ${barrasH('H. paradas por motivo', a.minutosPorMotivo, h)}
         ${barrasH('RDOs por pessoa', a.pessoas.map((p) => [p.pessoa, p.rdos]))}
-        ${barrasH('Ocorrências por tipo', a.ocorrenciasPorTipo)}
+        ${barrasH('Desvios por tipo', a.ocorrenciasPorTipo)}
 
         <div class="section-label">Por pessoa</div>
         ${tabela(['Pessoa', 'RDOs', 'Tar.', 'Exec.', 'Andam.', 'H. par.', 'Últ. RDO'],
@@ -474,7 +475,7 @@ ${linhas.map((l) => `<Row>${l.map(cel).join('')}</Row>`).join('\n')}
       ['Tarefas em andamento (1% a 99%)', a.emAndamento.length], ['Tarefas não iniciadas (0%)', a.naoIniciadas.length],
       ['Execução média (%)', a.mediaExecucao], ['Equipamentos parados', a.equipParados.length],
       ['Equipamentos em manutenção', a.equipManutencao.length], ['Equipamentos operando', a.equipOperando.length],
-      ['Horas paradas', h(a.minParados)], ['Paradas', a.paradas.length], ['Ocorrências', a.ocorrencias.length],
+      ['Horas paradas', h(a.minParados)], ['Paradas', a.paradas.length], ['Desvios', a.ocorrencias.length],
       ['Gerado em', new Date().toLocaleString('pt-BR')],
     ];
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -484,7 +485,7 @@ ${linhas.map((l) => `<Row>${l.map(cel).join('')}</Row>`).join('\n')}
 ${aba('Resumo', ['Indicador', 'Valor'], resumo)}
 ${aba('Por pessoa', ['Pessoa', 'RDOs', 'Tarefas', 'Executadas', 'Em andamento', 'Horas paradas', 'Último RDO'],
     a.pessoas.map((p) => [p.pessoa, p.rdos, p.tarefas, p.executadas, p.emAndamento, h(p.minParados), fmtDate(p.ultimo)]))}
-${aba('RDOs', ['Data', 'Nº RDO', 'Pessoa', 'Local', 'Tipo', 'Turno', 'Status', 'Pessoas no RDO', 'Tarefas', 'Executadas', 'Equip. parados/manut.', 'Horas paradas', 'Ocorrências'],
+${aba('RDOs', ['Data', 'Nº RDO', 'Pessoa', 'Local', 'Tipo', 'Turno', 'Status', 'Pessoas no RDO', 'Tarefas', 'Executadas', 'Equip. parados/manut.', 'Horas paradas', 'Desvios'],
     a.rdos.map((r) => [fmtDate(r.data), r.rdo, r.pessoa, r.local, r.tipo, r.turno, r.status, r.pessoasNoRdo, r.tarefas, r.executadas, r.equipParados, h(r.minParados), r.ocorrencias]))}
 ${aba('Tarefas', ['Data', 'Nº RDO', 'Pessoa', 'OS', 'TAG', 'Descrição', 'Tipo', 'Área', 'Execução (%)', 'Situação'],
     a.tarefas.map((t) => [fmtDate(t.data), t.rdo, t.pessoa, t.os, t.tag, t.descricao, t.tipo, t.area, t.execucao, t.execucao >= 100 ? 'Executada' : t.execucao > 0 ? 'Em andamento' : 'Não iniciada']))}
@@ -492,8 +493,8 @@ ${aba('Equipamentos', ['Data', 'Nº RDO', 'Pessoa', 'Equipamento', 'Status', 'Ho
     a.equipamentos.map((e) => [fmtDate(e.data), e.rdo, e.pessoa, e.equipamento, e.status, e.horimetroIni, e.horimetroFim]))}
 ${aba('Horas paradas', ['Data', 'Nº RDO', 'Pessoa', 'Início', 'Fim', 'Horas', 'Motivo', 'Observação'],
     a.paradas.map((p) => [fmtDate(p.data), p.rdo, p.pessoa, p.inicio, p.fim, h(p.minutos), p.motivo, p.obs]))}
-${aba('Ocorrências', ['Data', 'Nº RDO', 'Pessoa', 'Hora', 'Tipo', 'Descrição', 'Local'],
-    a.ocorrencias.map((o) => [fmtDate(o.data), o.rdo, o.pessoa, o.hora, o.tipo, o.descricao, o.local]))}
+${aba('Desvios', ['Data', 'Nº RDO', 'Pessoa', 'Hora', 'Tipo', 'Descrição', 'Local do desvio', 'Local do RDO'],
+    a.ocorrencias.map((o) => [fmtDate(o.data), o.rdo, o.pessoa, o.hora, o.tipo, o.descricao, o.onde, o.local]))}
 </Workbook>`;
     return new Blob(['﻿', xml], { type: 'application/vnd.ms-excel' });
   }

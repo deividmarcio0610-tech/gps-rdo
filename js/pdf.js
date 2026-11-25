@@ -245,16 +245,23 @@ window.Pdf = (() => {
     return `STATUS OM: CONCLUIDO (${m(preenchido && p >= 100)}) EM ANDAMENTO (${m(preenchido && p > 0 && p < 100)}) NÃO EXECUTADO (${m(preenchido && p === 0)}) `;
   }
 
-  /** Partes do campo OBSERVAÇÕES: nota do dia, local/turno, ocorrências, equipamentos e paradas. */
-  function partesObservacoes(rdo) {
+  /**
+   * Partes do campo OBSERVAÇÕES: nota do dia, local/turno, ocorrências, equipamentos e paradas.
+   * Desvios (pedido de 24/11/2026: "Ocorrências" viraram "Desvios"; o dado continua em
+   * `occurrences`) vêm primeiro, como "Desvio N". No Relatório de Campo eles têm o bloco
+   * DESVIOS DO DIA na linha 5 e não se repetem aqui (`semDesvios`).
+   */
+  function partesObservacoes(rdo, { semDesvios = false } = {}) {
     const partes = [];
+    if (!semDesvios) {
+      (rdo.occurrences || []).forEach((o, i) => {
+        const texto = [[o.time, o.type].filter(Boolean).join(' '), o.description, o.location].filter(Boolean).join(' — ');
+        if (texto) partes.push([`Desvio ${i + 1}`, texto]);
+      });
+    }
     // o turno vai na coluna Equipe dos funcionários; aqui fica só o local
     if (rdo.location) partes.push(['Local', rdo.location]);
     if (String(rdo.notes || '').trim()) partes.push(['Observações', String(rdo.notes).trim()]);
-    (rdo.occurrences || []).forEach((o, i) => {
-      const texto = [[o.time, o.type].filter(Boolean).join(' '), o.description, o.location].filter(Boolean).join(' — ');
-      if (texto) partes.push([`Ocorrência ${i + 1}`, texto]);
-    });
     (rdo.equipmentList || []).forEach((e, i) => {
       const horas = [e.hoursStart, e.hoursEnd].some((v) => v != null && v !== '')
         ? `horímetro ${[e.hoursStart, e.hoursEnd].map((v) => (v == null || v === '' ? '?' : `${v}h`)).join(' a ')}` : '';
@@ -289,8 +296,14 @@ window.Pdf = (() => {
     return { alturas, ys, linha: (n) => (comBloqueio && n >= 16 ? n + 1 : n) };
   }
 
-  /** Uma folha do RDO ADM na página atual. `k` é a folha (0 = primeira). */
-  function folha(doc, rdo, k, nFolhas, resto) {
+  /** Uma linha por desvio, para o bloco do Relatório de Campo: "1) tipo — hora — local — descrição". */
+  function linhasDesvios(lista) {
+    return lista.map((o, i) => `${i + 1}) ${[o.type || 'Sem tipo', o.time, o.location, o.description]
+      .map((v) => String(v || '').trim()).filter(Boolean).join(' — ')}`);
+  }
+
+  /** Uma folha do RDO ADM na página atual. `k` é a folha (0 = primeira); `campo` é o Relatório de Campo. */
+  function folha(doc, rdo, k, nFolhas, resto, campo = false) {
     const comBloqueio = Boolean(rdo.bloqueio && (rdo.bloqueio.inicio || rdo.bloqueio.fim));
     const { alturas, ys, linha } = geometria(comBloqueio);
     const areaAqui = (a, b, r1, r2 = r1) => {
@@ -328,9 +341,22 @@ window.Pdf = (() => {
     guarda(c('F', 'G', 4, 4, rdo.gerencia, { ...valor, size: 6.3 }), 'Gerência', rdo.gerencia);
     c('H', 'I', 4, 4, 'EQUIPE/ COORDENAÇÃO:', { ...valor, size: 6.3 });
     guarda(c('J', 'M', 4, 4, rdo.equipeCoord, valor), 'Equipe / Coordenação', rdo.equipeCoord);
-    // Campo Objeto saiu do formulário (pedido de 09/11/2026): a linha só é desenhada
-    // quando o RDO ainda tem o texto, para os antigos não perderem o dado.
-    if (String(rdo.objeto || '').trim()) {
+    // Relatório de Campo (pedido de 24/11/2026): DESVIOS DO DIA logo depois do cabeçalho, na
+    // linha 5, que ficava vazia sem o Objeto. A geometria da folha não muda. O Objeto de RDO
+    // antigo vai inteiro para a continuação; o texto dos desvios que não couber, também.
+    if (campo) {
+      const desvios = rdo.occurrences || [];
+      c('B', 'D', 5, 5, desvios.length ? `DESVIOS DO DIA (${desvios.length})` : 'DESVIOS DO DIA', valor);
+      if (k === 0) {
+        const lista = desvios.length ? linhasDesvios(desvios).join('\n') : 'Sem desvios registrados';
+        guarda(c('E', 'M', 5, 5, lista, { font: 'times', bold: true, size: 7 }), 'Desvios do dia', lista);
+      } else {
+        c('E', 'M', 5, 5, 'Desvios do dia na folha 1.', { font: 'times', size: 7 });
+      }
+      guarda(Boolean(String(rdo.objeto || '').trim()), 'Objeto', rdo.objeto);
+    } else if (String(rdo.objeto || '').trim()) {
+      // Campo Objeto saiu do formulário (pedido de 09/11/2026): a linha só é desenhada
+      // quando o RDO ainda tem o texto, para os antigos não perderem o dado.
       c('B', 'C', 5, 5, 'Objeto:', valor);
       guarda(c('D', 'M', 5, 5, rdo.objeto, { font: 'times', bold: true, size: 7.6 }), 'Objeto', rdo.objeto);
     }
@@ -389,7 +415,7 @@ window.Pdf = (() => {
     const ROBS = linha(41);
     c('B', 'C', ROBS, ROBS, 'OBSERVAÇÕES:', valor);
     if (k === 0) {
-      const partes = partesObservacoes(rdo);
+      const partes = partesObservacoes(rdo, { semDesvios: campo });
       const texto = partes.map(([campo, v]) => (campo === 'Observações' ? v : `${campo}: ${v}`)).join('  |  ');
       if (c('D', 'M', ROBS, ROBS, texto, { size: 7, valign: 'top' })) {
         partes.forEach(([campo, v]) => guarda(true, campo, v));
@@ -530,7 +556,10 @@ window.Pdf = (() => {
     // A linha 9 sai das mesmas horas da conta: bloqueio pela metade ou com hora inválida (dado
     // torto vindo do banco) não desenha linha sem desconto nem hora diferente da frase.
     rdo.bloqueio = contaBloqueio ? { inicio: contaBloqueio.inicio, fim: contaBloqueio.fim, motivo: contaBloqueio.motivo } : null;
-    const fotos = rdo.photos || [];
+    // Lista congelada (pedido de 24/11/2026): `Store.completo` é cópia rasa, então `rdo.photos`
+    // é a lista guardada. Uma foto que entra enquanto as imagens são lidas ficava com legenda
+    // e sem imagem ("Foto indisponível"); agora fica para o próximo PDF.
+    const fotos = (rdo.photos || []).slice();
     const larg = doc.internal.pageSize.getWidth();
     const alt = doc.internal.pageSize.getHeight();
     const margem = 10;
@@ -543,7 +572,7 @@ window.Pdf = (() => {
     const resto = [];
     for (let k = 0; k < nFolhas; k += 1) {
       if (k > 0 || !primeira) doc.addPage();
-      folha(doc, rdo, k, nFolhas, resto);
+      folha(doc, rdo, k, nFolhas, resto, campo);
     }
     let y = fim;
 
@@ -678,7 +707,7 @@ window.Pdf = (() => {
       ['Tarefas Preventiva / Corretiva / Backlog', `${r.tarefasPorTipo.Preventiva} / ${r.tarefasPorTipo.Corretiva} / ${r.tarefasPorTipo.Backlog}`],
       ['Backlog ainda aberto (abaixo de 100%)', String(r.backlogAberto)],
       ['Horas de equipe (presentes)', `${r.horasEquipe}h`],
-      ['Ocorrências', String(r.ocorrencias)],
+      ['Desvios', String(r.ocorrencias)],
       ['Fotos', String(r.fotos)],
     ], { 0: { cellWidth: 110 }, 1: { halign: 'right' } });
 
