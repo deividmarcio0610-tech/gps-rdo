@@ -37,6 +37,12 @@ window.Equipamentos = (() => {
   // texto de uma célula: a lista usa no máximo 60 letras; texto enorme citado por muitas células
   // levava minutos para ler (revisão de 25/11/2026)
   const LIMITE_TEXTO = 200;
+  // acento solto em sequência longa (marcas combinantes de classes misturadas) deixa o
+  // normalize('NFD') quadrático no tamanho da sequência: dentro do corte de 200 caracteres, uma
+  // célula custava ~150 µs, e uma planilha de 0,49 MB travava a importação por ~65 s num PC.
+  // Texto de verdade tem 1 ou 2 marcas seguidas: ficam as 3 primeiras de cada sequência.
+  const MARCAS_DEMAIS = /(\p{M}{3})\p{M}+/gu;
+  const semMarcasDemais = (texto) => texto.replace(MARCAS_DEMAIS, '$1');
 
   // ------------------------------------------------------------ zip
 
@@ -233,7 +239,7 @@ window.Equipamentos = (() => {
     const alvo = [...rels.matchAll(/<Relationship\b[^<>]*>/g)].map((m) => m[0]).find((t) => atributo(t, 'Id') === rid);
     let caminho = atributo(alvo || '', 'Target') || 'worksheets/sheet1.xml';
     caminho = caminho.startsWith('/') ? caminho.slice(1) : `xl/${caminho}`;
-    const compartilhadas = [...elementos(await pegar('xl/sharedStrings.xml'), 'si')].map(({ corpo }) => textosT(corpo).trim().slice(0, LIMITE_TEXTO));
+    const compartilhadas = [...elementos(await pegar('xl/sharedStrings.xml'), 'si')].map(({ corpo }) => semMarcasDemais(textosT(corpo).trim().slice(0, LIMITE_TEXTO)));
     const folha = await pegar(caminho);
     if (!folha) throw erro('Não achei a primeira aba da planilha.');
     const grade = new Map();
@@ -246,7 +252,7 @@ window.Equipamentos = (() => {
       if (t === 's' && v != null) val = compartilhadas[Number(v)] ?? '';
       else if (t === 'inlineStr') val = textosT(corpo);
       else if (v != null) val = textoXml(v);
-      val = String(val).trim().slice(0, LIMITE_TEXTO);
+      val = semMarcasDemais(String(val).trim().slice(0, LIMITE_TEXTO));
       if (!val) continue;
       grade.set(pos.join(':'), val);
       if (grade.size > LIMITE_CELULAS) throw erro('Planilha grande demais.');
@@ -368,7 +374,7 @@ window.Equipamentos = (() => {
   // ------------------------------------------------------------ lista
 
   // texto de fora (planilha, banco, aparelho): sem caractere de controle, espaço único, com limite
-  const limpo = (v, max) => String(v ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+  const limpo = (v, max) => String(v ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max).replace(MARCAS_DEMAIS, '$1');
 
   /** Lista vinda do banco ou do aparelho, saneada: itens válidos, sem TAG repetida, no máximo 1000. */
   function normalizar(dados) {

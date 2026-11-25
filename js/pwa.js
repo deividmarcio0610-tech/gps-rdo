@@ -10,7 +10,7 @@ window.Pwa = (() => {
   const ouvintes = [];
 
   // versão do código deste build; subir junto com o versionName do Gradle e com VERSAO do sw.js
-  const VERSAO_APP = '1.15';
+  const VERSAO_APP = '1.16';
   const APK_URL = 'https://github.com/deividmarcio0610-tech/gps-rdo/releases/latest/download/GPS-RDO.apk';
   const NATIVO = () => Boolean(window.Capacitor?.isNativePlatform?.());
 
@@ -172,12 +172,19 @@ window.Pwa = (() => {
     'Relatório de Campo: bloco DESVIOS DO DIA logo depois do cabeçalho. No RDO Final os desvios vêm primeiro nas observações, e o resumo do WhatsApp também começa por eles.',
     'Foto da câmera: o PDF espera a foto que ainda está entrando, para ela não ficar fora do Relatório de Campo.',
   ];
+  // A v55 leva a v54 ao APK 1.16 e repete as novidades dela, pelo mesmo motivo: a v54 ficou
+  // poucos minutos no ar, e quem abre o app pula da v53 direto para a v55.
+  const NOVIDADES_V54 = [
+    'Equipamentos: o botão Escolher da lista mostra as máquinas da lista do cliente, em grupos e com busca por frota, modelo ou TAG. Marque as do dia e toque em Adicionar marcados. Digitar outro continua para o que não está na lista.',
+    'Máquina da lista pode ser salva só com o horímetro; o status fica para depois. O PDF e o WhatsApp mostram o nome e a TAG.',
+    'Conta principal: tela Lista de Equipamentos, para importar a planilha (.xlsx). A planilha é lida no próprio aparelho, e vai para o banco só grupo, modelo, frota e TAG.',
+  ];
   const NOVIDADES = {
-    v54: [
-      'Equipamentos: o botão Escolher da lista mostra as máquinas da lista do cliente, em grupos e com busca por frota, modelo ou TAG. Marque as do dia e toque em Adicionar marcados. Digitar outro continua para o que não está na lista.',
-      'Máquina da lista pode ser salva só com o horímetro; o status fica para depois. O PDF e o WhatsApp mostram o nome e a TAG.',
-      'Conta principal: tela Lista de Equipamentos, para importar a planilha (.xlsx). A planilha é lida no próprio aparelho, e vai para o banco só grupo, modelo, frota e TAG.',
+    v55: [
+      'APK 1.16: traz a lista de equipamentos do cliente (v54).',
+      ...NOVIDADES_V54,
     ],
+    v54: [...NOVIDADES_V54],
     v53: [
       'APK 1.14: traz tudo da v50 à v52 (Envio Rápido ao Supervisor, Desvios, foto da câmera no Relatório de Campo).',
       ...NOVIDADES_V52,
